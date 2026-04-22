@@ -75,6 +75,40 @@ Left menu sections:
 - `Runs & Logs`: inspect execution history and step logs.
 - `Access Control`: create users and roles.
 
+## 5.1 UI Screenshots
+
+Place screenshots in:
+
+```text
+docs/screenshots/
+```
+
+Use these exact filenames:
+
+```text
+00-login.png
+01-data-source.png
+02-destination.png
+03-transform-builder.png
+04-pipelines.png
+05-runs-logs.png
+06-access-control.png
+```
+
+Recommended capture size: `1440 x 1000`.
+
+Screenshot links:
+
+| Page | File |
+| --- | --- |
+| Login | [00-login.png](screenshots/00-login.png) |
+| Data Source | [01-data-source.png](screenshots/01-data-source.png) |
+| Destination | [02-destination.png](screenshots/02-destination.png) |
+| Transform Builder | [03-transform-builder.png](screenshots/03-transform-builder.png) |
+| Pipelines | [04-pipelines.png](screenshots/04-pipelines.png) |
+| Runs & Logs | [05-runs-logs.png](screenshots/05-runs-logs.png) |
+| Access Control | [06-access-control.png](screenshots/06-access-control.png) |
+
 ## 6. Configure Data Source
 
 Use this section to define where data is read from.

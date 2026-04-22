@@ -1,0 +1,14 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+data/
+logs/
+node_modules/
+dist/
+.env
+.DS_Store
+Screenshot*.png

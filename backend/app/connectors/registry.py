@@ -1,3 +1,6 @@
+from urllib.parse import urlparse
+
+from app.core.config import get_settings
 from app.models.schemas import ConnectorDefinition
 
 
@@ -76,10 +79,32 @@ CONNECTORS: dict[str, ConnectorDefinition] = {
 
 
 def list_connectors() -> list[ConnectorDefinition]:
-    return list(CONNECTORS.values())
+    defaults = _postgres_defaults()
+    connectors: list[ConnectorDefinition] = []
+    for connector in CONNECTORS.values():
+        data = connector.model_dump()
+        if connector.key in {"postgres_source", "postgres_destination"}:
+            properties = data["config_schema"].get("properties", {})
+            for key, value in defaults.items():
+                if key in properties:
+                    properties[key] = {**properties[key], "default": value}
+        connectors.append(ConnectorDefinition(**data))
+    return connectors
 
 
 def get_connector(key: str) -> ConnectorDefinition:
     if key not in CONNECTORS:
         raise KeyError(f"Unknown connector: {key}")
     return CONNECTORS[key]
+
+
+def _postgres_defaults() -> dict[str, object]:
+    parsed = urlparse(get_settings().metadata_database_url)
+    return {
+        "host": parsed.hostname or "",
+        "port": parsed.port or 5432,
+        "database": parsed.path.lstrip("/"),
+        "username": parsed.username or "",
+        "password": parsed.password or "",
+        "schema": "public",
+    }

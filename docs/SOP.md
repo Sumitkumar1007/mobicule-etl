@@ -30,15 +30,23 @@ The login screen appears first.
 
 ### Login
 
-1. Select a user from the dropdown.
-2. Click `Login`.
+1. Enter email.
+2. Enter password.
+3. Click `Login`.
 
-No password is required in this MVP. The login is a browser session for application workflow access.
+Default local bootstrap user:
+
+```text
+Email: admin@mobiflow.local
+Password: ChangeMe@12345!
+```
+
+For production, set a new `MOBIFLOW_BOOTSTRAP_ADMIN_PASSWORD` before first backend startup.
 
 ### Logout
 
 1. Click `Logout` in the top bar.
-2. The browser session is cleared.
+2. The backend session token is revoked.
 3. The login page appears again.
 
 ## 4. Logo Setup
@@ -534,8 +542,9 @@ Create user:
 
 1. Enter name.
 2. Enter email.
-3. Select role.
-4. Click `Create user`.
+3. Enter password.
+4. Select role.
+5. Click `Create user`.
 
 Roles:
 
@@ -618,8 +627,8 @@ Check:
 
 Before production:
 
-- Replace no-password login with real authentication.
-- Enforce role permissions server-side.
+- Change bootstrap admin password and keep it outside source control.
+- Enforce fine-grained role permissions for every write route.
 - Store secrets in vault.
 - Move scheduler/runner to durable worker service.
 - Add retries and dead-letter handling.

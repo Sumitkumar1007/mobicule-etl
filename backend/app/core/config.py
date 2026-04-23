@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     api_prefix: str = "/api"
     metadata_database_url: str
     log_path: Path = Path("logs/app.log")
+    auth_token_ttl_hours: int = 12
+    bootstrap_admin_email: str = "admin@mobiflow.local"
+    bootstrap_admin_password: str | None = None
     cors_origins: list[str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",

@@ -1,10 +1,12 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
 from app.connectors.registry import get_connector, list_connectors
 from app.db.database import db, decode, encode
 from app.models.schemas import (
     ConnectorDefinition,
+    AuthResponse,
+    LoginRequest,
     MetadataRequest,
     Pipeline,
     PipelineCreate,
@@ -25,6 +27,8 @@ from app.models.schemas import (
     User,
     UserCreate,
 )
+from app.core.security import hash_password
+from app.services.auth import bearer_token, current_user, login, logout, require_role
 from app.services.metadata import source_columns
 from app.services.runner import enqueue_run, extract, preview
 from app.services.transforms import preview_transforms, validate_transforms
@@ -35,6 +39,25 @@ router = APIRouter()
 @router.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@router.post("/auth/login", response_model=AuthResponse)
+def auth_login(payload: LoginRequest) -> AuthResponse:
+    token, user = login(payload.email, payload.password)
+    return AuthResponse(token=token, user=user)
+
+
+@router.post("/auth/logout")
+def auth_logout(request: Request) -> dict[str, str]:
+    token = bearer_token(request)
+    if token:
+        logout(token)
+    return {"status": "logged_out"}
+
+
+@router.get("/auth/me", response_model=User)
+def auth_me(request: Request) -> User:
+    return current_user(request)
 
 
 @router.get("/connectors", response_model=list[ConnectorDefinition])
@@ -48,17 +71,20 @@ def sources() -> list[Resource]:
 
 
 @router.post("/sources", response_model=Resource)
-def create_source(payload: ResourceCreate) -> Resource:
+def create_source(payload: ResourceCreate, request: Request) -> Resource:
+    require_role(request, {"admin"})
     return _create_resource("source", payload)
 
 
 @router.put("/sources/{resource_id}", response_model=Resource)
-def update_source(resource_id: int, payload: ResourceUpdate) -> Resource:
+def update_source(resource_id: int, payload: ResourceUpdate, request: Request) -> Resource:
+    require_role(request, {"admin"})
     return _update_resource("source", resource_id, payload)
 
 
 @router.delete("/sources/{resource_id}")
-def delete_source(resource_id: int) -> dict[str, str]:
+def delete_source(resource_id: int, request: Request) -> dict[str, str]:
+    require_role(request, {"admin"})
     _delete_resource("source", resource_id)
     return {"status": "deleted"}
 
@@ -69,17 +95,20 @@ def destinations() -> list[Resource]:
 
 
 @router.post("/destinations", response_model=Resource)
-def create_destination(payload: ResourceCreate) -> Resource:
+def create_destination(payload: ResourceCreate, request: Request) -> Resource:
+    require_role(request, {"admin"})
     return _create_resource("destination", payload)
 
 
 @router.put("/destinations/{resource_id}", response_model=Resource)
-def update_destination(resource_id: int, payload: ResourceUpdate) -> Resource:
+def update_destination(resource_id: int, payload: ResourceUpdate, request: Request) -> Resource:
+    require_role(request, {"admin"})
     return _update_resource("destination", resource_id, payload)
 
 
 @router.delete("/destinations/{resource_id}")
-def delete_destination(resource_id: int) -> dict[str, str]:
+def delete_destination(resource_id: int, request: Request) -> dict[str, str]:
+    require_role(request, {"admin"})
     _delete_resource("destination", resource_id)
     return {"status": "deleted"}
 
@@ -92,7 +121,8 @@ def pipelines() -> list[Pipeline]:
 
 
 @router.post("/pipelines", response_model=Pipeline)
-def create_pipeline(payload: PipelineCreate) -> Pipeline:
+def create_pipeline(payload: PipelineCreate, request: Request) -> Pipeline:
+    require_role(request, {"admin"})
     try:
         get_connector(payload.source_key)
         get_connector(payload.destination_key)
@@ -120,7 +150,8 @@ def create_pipeline(payload: PipelineCreate) -> Pipeline:
 
 
 @router.put("/pipelines/{pipeline_id}", response_model=Pipeline)
-def update_pipeline(pipeline_id: int, payload: PipelineUpdate) -> Pipeline:
+def update_pipeline(pipeline_id: int, payload: PipelineUpdate, request: Request) -> Pipeline:
+    require_role(request, {"admin"})
     current = get_pipeline(pipeline_id)
     data = current.model_dump()
     update = payload.model_dump(exclude_unset=True)
@@ -150,7 +181,8 @@ def update_pipeline(pipeline_id: int, payload: PipelineUpdate) -> Pipeline:
 
 
 @router.delete("/pipelines/{pipeline_id}")
-def delete_pipeline(pipeline_id: int) -> dict[str, str]:
+def delete_pipeline(pipeline_id: int, request: Request) -> dict[str, str]:
+    require_role(request, {"admin"})
     with db() as conn:
         conn.execute("DELETE FROM pipelines WHERE id=?", (pipeline_id,))
     return {"status": "deleted"}
@@ -164,7 +196,8 @@ def transformations() -> list[Transformation]:
 
 
 @router.post("/transformations", response_model=Transformation)
-def create_transformation(payload: TransformationCreate) -> Transformation:
+def create_transformation(payload: TransformationCreate, request: Request) -> Transformation:
+    require_role(request, {"admin"})
     with db() as conn:
         row = conn.execute(
             """
@@ -187,7 +220,12 @@ def get_transformation(transformation_id: int) -> Transformation:
 
 
 @router.put("/transformations/{transformation_id}", response_model=Transformation)
-def update_transformation(transformation_id: int, payload: TransformationUpdate) -> Transformation:
+def update_transformation(transformation_id: int, payload: TransformationUpdate, request: Request) -> Transformation:
+    require_role(request, {"admin"})
+    return _update_transformation_record(transformation_id, payload)
+
+
+def _update_transformation_record(transformation_id: int, payload: TransformationUpdate) -> Transformation:
     current = get_transformation(transformation_id)
     data = current.model_dump()
     update = payload.model_dump(exclude_unset=True)
@@ -214,43 +252,48 @@ def update_transformation(transformation_id: int, payload: TransformationUpdate)
 
 
 @router.delete("/transformations/{transformation_id}")
-def delete_transformation(transformation_id: int) -> dict[str, str]:
+def delete_transformation(transformation_id: int, request: Request) -> dict[str, str]:
+    require_role(request, {"admin"})
     with db() as conn:
         conn.execute("DELETE FROM transformations WHERE id=?", (transformation_id,))
     return {"status": "deleted"}
 
 
 @router.post("/transformations/{transformation_id}/steps", response_model=Transformation)
-def add_transformation_step(transformation_id: int, step: dict[str, object]) -> Transformation:
+def add_transformation_step(transformation_id: int, step: dict[str, object], request: Request) -> Transformation:
+    require_role(request, {"admin"})
     transformation = get_transformation(transformation_id)
     steps = [item.model_dump() for item in transformation.steps]
     steps.append(step)
-    return update_transformation(transformation_id, TransformationUpdate(steps=steps))
+    return _update_transformation_record(transformation_id, TransformationUpdate(steps=steps))
 
 
 @router.put("/transformations/{transformation_id}/steps/reorder", response_model=Transformation)
-def reorder_transformation_steps(transformation_id: int, payload: dict[str, list[str]]) -> Transformation:
+def reorder_transformation_steps(transformation_id: int, payload: dict[str, list[str]], request: Request) -> Transformation:
+    require_role(request, {"admin"})
     transformation = get_transformation(transformation_id)
     order = payload.get("step_ids", [])
     by_id = {item.id: item.model_dump() for item in transformation.steps}
     steps = [by_id[item] for item in order if item in by_id]
     steps.extend(item.model_dump() for item in transformation.steps if item.id not in order)
-    return update_transformation(transformation_id, TransformationUpdate(steps=steps))
+    return _update_transformation_record(transformation_id, TransformationUpdate(steps=steps))
 
 
 @router.put("/transformations/{transformation_id}/steps/{step_id}", response_model=Transformation)
-def update_transformation_step(transformation_id: int, step_id: str, step: dict[str, object]) -> Transformation:
+def update_transformation_step(transformation_id: int, step_id: str, step: dict[str, object], request: Request) -> Transformation:
+    require_role(request, {"admin"})
     transformation = get_transformation(transformation_id)
     steps = [item.model_dump() for item in transformation.steps]
     steps = [step if item["id"] == step_id else item for item in steps]
-    return update_transformation(transformation_id, TransformationUpdate(steps=steps))
+    return _update_transformation_record(transformation_id, TransformationUpdate(steps=steps))
 
 
 @router.delete("/transformations/{transformation_id}/steps/{step_id}", response_model=Transformation)
-def delete_transformation_step(transformation_id: int, step_id: str) -> Transformation:
+def delete_transformation_step(transformation_id: int, step_id: str, request: Request) -> Transformation:
+    require_role(request, {"admin"})
     transformation = get_transformation(transformation_id)
     steps = [item.model_dump() for item in transformation.steps if item.id != step_id]
-    return update_transformation(transformation_id, TransformationUpdate(steps=steps))
+    return _update_transformation_record(transformation_id, TransformationUpdate(steps=steps))
 
 
 @router.post("/transformations/{transformation_id}/preview", response_model=TransformationPreviewResponse)
@@ -300,7 +343,8 @@ def validate_transformation(transformation_id: int) -> TransformationValidationR
 
 
 @router.post("/transformations/{transformation_id}/publish", response_model=Transformation)
-def publish_transformation(transformation_id: int) -> Transformation:
+def publish_transformation(transformation_id: int, request: Request) -> Transformation:
+    require_role(request, {"admin"})
     validation = validate_transformation(transformation_id)
     if validation.errors:
         raise HTTPException(status_code=400, detail="; ".join(validation.errors))
@@ -337,7 +381,8 @@ def get_pipeline(pipeline_id: int) -> Pipeline:
 
 
 @router.post("/pipelines/{pipeline_id}/runs", response_model=Run)
-def start_run(pipeline_id: int) -> Run:
+def start_run(pipeline_id: int, request: Request) -> Run:
+    require_role(request, {"admin", "support"})
     with db() as conn:
         exists = conn.execute("SELECT 1 FROM pipelines WHERE id=?", (pipeline_id,)).fetchone()
     if exists is None:
@@ -347,7 +392,8 @@ def start_run(pipeline_id: int) -> Run:
 
 
 @router.post("/runs/{run_id}/stop", response_model=Run)
-def stop_run(run_id: int) -> Run:
+def stop_run(run_id: int, request: Request) -> Run:
+    require_role(request, {"admin", "support"})
     with db() as conn:
         conn.execute(
             """
@@ -401,22 +447,24 @@ def download_logs(run_id: int) -> PlainTextResponse:
 
 
 @router.get("/users", response_model=list[User])
-def users() -> list[User]:
+def users(request: Request) -> list[User]:
+    require_role(request, {"admin"})
     with db() as conn:
         rows = conn.execute("SELECT id, name, email, role, created_at FROM users ORDER BY id DESC").fetchall()
     return [User(**dict(row)) for row in rows]
 
 
 @router.post("/users", response_model=User)
-def create_user(payload: UserCreate) -> User:
+def create_user(payload: UserCreate, request: Request) -> User:
+    require_role(request, {"admin"})
     with db() as conn:
         row = conn.execute(
             """
-            INSERT INTO users (name, email, role)
-            VALUES (?, ?, ?)
+            INSERT INTO users (name, email, role, password_hash)
+            VALUES (?, ?, ?, ?)
             RETURNING id, name, email, role, created_at
             """,
-            (payload.name, payload.email, payload.role),
+            (payload.name, payload.email, payload.role, hash_password(payload.password)),
         ).fetchone()
     return User(**dict(row))
 

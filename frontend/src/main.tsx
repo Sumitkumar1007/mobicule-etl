@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./styles.css";
 
 const API = import.meta.env.VITE_API_URL ?? "http://10.10.0.10:8000/api";
-const SESSION_KEY = "mobiflow_user";
+const SESSION_KEY = "mobiflow_session";
 
 type Connector = {
   key: string;
@@ -79,6 +79,7 @@ type User = {
   role: "admin" | "support" | "viewer";
   created_at: string;
 };
+type AuthSession = { token: string; user: User };
 
 type StepType = "select" | "rename" | "cast" | "fillna" | "derive" | "filter" | "deduplicate" | "sort";
 type Operand = { kind: "column" | "constant"; value: string };
@@ -117,8 +118,9 @@ type Toast = { tone: "ok" | "bad"; text: string } | null;
 type Menu = "datasources" | "destinations" | "transforms" | "pipelines" | "runs" | "access";
 
 function App() {
-  const [currentUser, setCurrentUser] = useState<User | null>(() => loadSessionUser());
+  const [currentUser, setCurrentUser] = useState<User | null>(() => loadSession()?.user ?? null);
   const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
   const [connectors, setConnectors] = useState<Connector[]>([]);
   const [sourceResources, setSourceResources] = useState<Resource[]>([]);
   const [destinationResources, setDestinationResources] = useState<Resource[]>([]);
@@ -139,6 +141,7 @@ function App() {
   const [activeTransformationId, setActiveTransformationId] = useState<number | null>(null);
   const [previewData, setPreviewData] = useState<TransformationPreview | null>(null);
   const [validationData, setValidationData] = useState<ValidationResult | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [previewTab, setPreviewTab] = useState<"input" | "output" | "validation" | "notes">("output");
   const [sampleSize, setSampleSize] = useState(50);
   const [previewStepId, setPreviewStepId] = useState("");
@@ -151,7 +154,7 @@ function App() {
     version: 1,
     steps: defaultSteps()
   });
-  const [userForm, setUserForm] = useState({ name: "", email: "", role: "viewer" as User["role"] });
+  const [userForm, setUserForm] = useState({ name: "", email: "", password: "", role: "viewer" as User["role"] });
   const [form, setForm] = useState({
     name: "Customer pipeline",
     source_id: "",
@@ -168,6 +171,8 @@ function App() {
 
   const sources = connectors.filter((item) => item.type === "source");
   const destinations = connectors.filter((item) => item.type === "destination");
+  const isAdmin = currentUser?.role === "admin";
+  const canRun = currentUser?.role === "admin" || currentUser?.role === "support";
   const latestRun = runs[0];
   const metrics = useMemo(
     () => ({
@@ -186,7 +191,7 @@ function App() {
       api<Pipeline[]>("/pipelines"),
       api<Transformation[]>("/transformations"),
       api<Run[]>("/runs"),
-      api<User[]>("/users")
+      isAdmin ? api<User[]>("/users") : Promise.resolve([])
     ]);
     setConnectors(connectorData);
     setSourceResources(sourceData);
@@ -197,6 +202,8 @@ function App() {
     setUsers(userData);
     setForm((current) => ({
       ...current,
+      source_config: refreshedConfig(current.source_config, connectorData.find((item) => item.key === current.source_key) ?? connectorData.find((item) => item.key === "postgres_source")),
+      destination_config: refreshedConfig(current.destination_config, connectorData.find((item) => item.key === current.destination_key) ?? connectorData.find((item) => item.key === "postgres_destination")),
       source_id: current.source_id || String(sourceData[0]?.id ?? ""),
       destination_id: current.destination_id || String(destinationData[0]?.id ?? ""),
       transformation_id: current.transformation_id || String(transformationData.find((item) => item.status === "published")?.id ?? "")
@@ -209,16 +216,17 @@ function App() {
   }
 
   useEffect(() => {
+    if (!currentUser) return;
     refresh().catch(showError);
     const timer = window.setInterval(() => refresh().catch(showError), 4000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => {
-    if (users.length && !loginEmail) {
-      setLoginEmail(users[0].email);
+    if (currentUser && currentUser.role !== "admin" && activeMenu === "access") {
+      setActiveMenu("datasources");
     }
-  }, [users, loginEmail]);
+  }, [currentUser, activeMenu]);
 
   useEffect(() => {
     if (!selectedRun) return;
@@ -301,9 +309,20 @@ function App() {
     await refresh();
   }
 
+  async function downloadRunLogs(id: number) {
+    const text = await apiText(`/runs/${id}/logs/download`);
+    const blob = new Blob([text], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `run-${id}-logs.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function createUser() {
     await api<User>("/users", { method: "POST", body: JSON.stringify(userForm) });
-    setUserForm({ name: "", email: "", role: "viewer" });
+    setUserForm({ name: "", email: "", password: "", role: "viewer" });
     setToast({ tone: "ok", text: "User created" });
     await refresh();
   }
@@ -320,20 +339,28 @@ function App() {
   }
 
   async function previewTransformation() {
-    const saved = await saveTransformationDraft();
-    const result = await api<TransformationPreview>(`/transformations/${saved.id}/preview`, {
+    const transformationId = isAdmin ? (await saveTransformationDraft()).id : activeTransformationId;
+    if (!transformationId) {
+      throw new Error("Select an existing transformation to preview");
+    }
+    const result = await api<TransformationPreview>(`/transformations/${transformationId}/preview`, {
       method: "POST",
       body: JSON.stringify({ sample_size: sampleSize, until_step_id: previewStepId || null })
     });
     setPreviewData(result);
+    setPreviewOpen(true);
     setPreviewTab("output");
     setToast({ tone: "ok", text: "Preview refreshed" });
   }
 
   async function validateTransformationDraft() {
-    const saved = await saveTransformationDraft();
-    const result = await api<ValidationResult>(`/transformations/${saved.id}/validate`, { method: "POST" });
+    const transformationId = isAdmin ? (await saveTransformationDraft()).id : activeTransformationId;
+    if (!transformationId) {
+      throw new Error("Select an existing transformation to validate");
+    }
+    const result = await api<ValidationResult>(`/transformations/${transformationId}/validate`, { method: "POST" });
     setValidationData(result);
+    setPreviewOpen(true);
     setPreviewTab("validation");
     setToast({ tone: result.errors.length ? "bad" : "ok", text: result.errors.length ? "Validation failed" : "Validation passed" });
   }
@@ -360,6 +387,7 @@ function App() {
     });
     setPreviewData(null);
     setValidationData(null);
+    setPreviewOpen(false);
   }
 
   function updateStep(stepId: string, updater: (step: TransformationStep) => TransformationStep) {
@@ -397,23 +425,49 @@ function App() {
     setToast({ tone: "bad", text: error instanceof Error ? error.message : "Request failed" });
   }
 
-  function login() {
-    const user = users.find((item) => item.email === loginEmail) ?? users[0];
-    if (!user) {
-      setToast({ tone: "bad", text: "Create user first" });
-      return;
-    }
-    setCurrentUser(user);
-    localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+  async function login() {
+    const session = await api<AuthSession>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email: loginEmail, password: loginPassword })
+    });
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    setCurrentUser(session.user);
+    setLoginPassword("");
+    setToast({ tone: "ok", text: `Welcome ${session.user.name}` });
+    await refresh();
   }
 
-  function logout() {
-    setCurrentUser(null);
-    localStorage.removeItem(SESSION_KEY);
+  async function logout() {
+    try {
+      await api<{ status: string }>("/auth/logout", { method: "POST" });
+    } catch {
+      // Session may already be expired. Local logout still needs to complete.
+    } finally {
+      setCurrentUser(null);
+      localStorage.removeItem(SESSION_KEY);
+      setConnectors([]);
+      setSourceResources([]);
+      setDestinationResources([]);
+      setPipelines([]);
+      setTransformations([]);
+      setRuns([]);
+      setLogs([]);
+      setUsers([]);
+    }
   }
 
   if (!currentUser) {
-    return <LoginPage users={users} loginEmail={loginEmail} onEmail={setLoginEmail} onLogin={login} toast={toast} onToast={setToast} />;
+    return (
+      <LoginPage
+        loginEmail={loginEmail}
+        loginPassword={loginPassword}
+        onEmail={setLoginEmail}
+        onPassword={setLoginPassword}
+        onLogin={() => login().catch(showError)}
+        toast={toast}
+        onToast={setToast}
+      />
+    );
   }
 
   return (
@@ -429,7 +483,7 @@ function App() {
           <button className={activeMenu === "transforms" ? "active" : ""} onClick={() => setActiveMenu("transforms")}>Transform</button>
           <button className={activeMenu === "pipelines" ? "active" : ""} onClick={() => setActiveMenu("pipelines")}>Pipelines</button>
           <button className={activeMenu === "runs" ? "active" : ""} onClick={() => setActiveMenu("runs")}>Runs & Logs</button>
-          <button className={activeMenu === "access" ? "active" : ""} onClick={() => setActiveMenu("access")}>Access Control</button>
+          {isAdmin && <button className={activeMenu === "access" ? "active" : ""} onClick={() => setActiveMenu("access")}>Access Control</button>}
         </nav>
       </aside>
 
@@ -440,7 +494,7 @@ function App() {
           </div>
           <div className="topbarActions">
             <span className="userBadge">{currentUser.name} · {currentUser.role}</span>
-            {activeMenu === "pipelines" && <button className="primary" onClick={() => savePipeline().catch(showError)}>{editingPipelineId ? "Update pipeline" : "Save pipeline"}</button>}
+            {isAdmin && activeMenu === "pipelines" && <button className="primary" onClick={() => savePipeline().catch(showError)}>{editingPipelineId ? "Update pipeline" : "Save pipeline"}</button>}
             <button className="ghost" onClick={logout}>Logout</button>
           </div>
         </header>
@@ -468,6 +522,7 @@ function App() {
               setResourceName(connector.name);
               setForm({ ...form, source_key: connector.key, source_config: sampleConfig(connector) });
             }}
+            readOnly={!isAdmin}
           />
         )}
 
@@ -494,6 +549,7 @@ function App() {
               setResourceName(connector.name);
               setForm({ ...form, destination_key: connector.key, destination_config: sampleConfig(connector) });
             }}
+            readOnly={!isAdmin}
           />
         )}
 
@@ -507,8 +563,8 @@ function App() {
               <div className="actions tight">
                 <button className="ghost" onClick={() => previewTransformation().catch(showError)}>Preview</button>
                 <button className="ghost" onClick={() => validateTransformationDraft().catch(showError)}>Validate</button>
-                <button className="ghost" onClick={() => saveTransformationDraft().catch(showError)}>Save Draft</button>
-                <button className="primary" onClick={() => publishTransformationDraft().catch(showError)}>Publish</button>
+                {isAdmin && <button className="ghost" onClick={() => saveTransformationDraft().catch(showError)}>Save Draft</button>}
+                {isAdmin && <button className="primary" onClick={() => publishTransformationDraft().catch(showError)}>Publish</button>}
               </div>
             </div>
 
@@ -528,7 +584,7 @@ function App() {
               <Status status={transformationDraft.status === "published" ? "succeeded" : "queued"} />
             </div>
 
-            <div className="builderGrid">
+            <div className={previewOpen ? "builderGrid previewVisible" : "builderGrid previewHidden"}>
               <SchemaExplorer
                 sourceResources={sourceResources}
                 destinationResources={destinationResources}
@@ -551,7 +607,7 @@ function App() {
                     <p className="eyebrow">Step canvas</p>
                     <h2>{transformationDraft.steps.length} steps</h2>
                   </div>
-                  <StepTypeSelector onSelect={addStep} />
+                  {isAdmin && <StepTypeSelector onSelect={addStep} />}
                 </div>
                 <div className="stepList">
                   {transformationDraft.steps.map((step, index) => (
@@ -565,22 +621,26 @@ function App() {
                       onDelete={() => setTransformationDraft({ ...transformationDraft, steps: transformationDraft.steps.filter((item) => item.id !== step.id) })}
                       onMoveUp={() => moveStep(step.id, -1)}
                       onMoveDown={() => moveStep(step.id, 1)}
+                      readOnly={!isAdmin}
                     />
                   ))}
                 </div>
               </section>
 
-              <PreviewPanel
-                tab={previewTab}
-                onTab={setPreviewTab}
-                preview={previewData}
-                validation={validationData}
-                sampleSize={sampleSize}
-                onSampleSize={setSampleSize}
-                previewStepId={previewStepId}
-                onPreviewStepId={setPreviewStepId}
-                steps={transformationDraft.steps}
-              />
+              {previewOpen && (
+                <PreviewPanel
+                  tab={previewTab}
+                  onTab={setPreviewTab}
+                  onClose={() => setPreviewOpen(false)}
+                  preview={previewData}
+                  validation={validationData}
+                  sampleSize={sampleSize}
+                  onSampleSize={setSampleSize}
+                  previewStepId={previewStepId}
+                  onPreviewStepId={setPreviewStepId}
+                  steps={transformationDraft.steps}
+                />
+              )}
             </div>
 
             <div className="executionSummary">
@@ -598,7 +658,7 @@ function App() {
               <p className="eyebrow">Pipeline Management</p>
               <h2>{editingPipelineId ? `Edit Pipeline #${editingPipelineId}` : "Create Pipeline"}</h2>
             </div>
-            {editingPipelineId && <button className="ghost small" onClick={() => {
+            {isAdmin && editingPipelineId && <button className="ghost small" onClick={() => {
               setEditingPipelineId(null);
               setForm({
                 ...form,
@@ -661,7 +721,7 @@ function App() {
                 <strong>{pipeline.name}</strong>
                 <span>{labelFor(connectors, pipeline.source_key)} → {labelFor(connectors, pipeline.destination_key)}</span>
                 <span>{pipeline.schedule || "Manual"}</span>
-                <button className="ghost small" onClick={() => {
+                {isAdmin && <button className="ghost small" onClick={() => {
                   setEditingPipelineId(pipeline.id);
                   setForm({
                     ...form,
@@ -677,9 +737,9 @@ function App() {
                     transforms: JSON.stringify(pipeline.transforms, null, 2),
                     schedule: pipeline.schedule || ""
                   });
-                }}>Edit</button>
-                <button className="primary small" onClick={() => runPipeline(pipeline.id).catch(showError)}>Run</button>
-                <button className="ghost small" onClick={() => deletePipeline(pipeline.id).catch(showError)}>Delete</button>
+                }}>Edit</button>}
+                {canRun && <button className="primary small" onClick={() => runPipeline(pipeline.id).catch(showError)}>Run</button>}
+                {isAdmin && <button className="ghost small" onClick={() => deletePipeline(pipeline.id).catch(showError)}>Delete</button>}
               </div>
             ))}
           </div>
@@ -723,7 +783,7 @@ function App() {
               </div>
             </div>
             <div className="logs">
-              {selectedRun && <a className="download" href={`${API}/runs/${selectedRun}/logs/download`}>Download logs</a>}
+              {selectedRun && <button className="download" onClick={() => downloadRunLogs(selectedRun).catch(showError)}>Download logs</button>}
               {logs.map((log) => (
                 <p key={log.id}><span>{log.level}</span>{log.message}</p>
               ))}
@@ -741,6 +801,7 @@ function App() {
           <div className="formGrid three">
             <label>Name<input value={userForm.name} onChange={(event) => setUserForm({ ...userForm, name: event.target.value })} /></label>
             <label>Email<input value={userForm.email} onChange={(event) => setUserForm({ ...userForm, email: event.target.value })} /></label>
+            <label>Password<input type="password" value={userForm.password} minLength={10} onChange={(event) => setUserForm({ ...userForm, password: event.target.value })} /></label>
             <label>
               Role
               <select value={userForm.role} onChange={(event) => setUserForm({ ...userForm, role: event.target.value as User["role"] })}>
@@ -832,16 +893,18 @@ function SchemaExplorer({
 }
 
 function LoginPage({
-  users,
   loginEmail,
+  loginPassword,
   onEmail,
+  onPassword,
   onLogin,
   toast,
   onToast
 }: {
-  users: User[];
   loginEmail: string;
+  loginPassword: string;
   onEmail: (value: string) => void;
+  onPassword: (value: string) => void;
   onLogin: () => void;
   toast: Toast;
   onToast: (value: Toast) => void;
@@ -851,14 +914,23 @@ function LoginPage({
       <section className="loginPanel">
         <LogoImage className="loginLogo" />
         <div>
-          <p className="eyebrow">ETL Control Plane</p>
+          <p className="eyebrow">ETL TOOL INHOUSE</p>
           <h1>Sign in</h1>
         </div>
         <label>
-          User
-          <select value={loginEmail} onChange={(event) => onEmail(event.target.value)}>
-            {users.map((user) => <option key={user.id} value={user.email}>{user.name} · {user.role}</option>)}
-          </select>
+          Email
+          <input value={loginEmail} onChange={(event) => onEmail(event.target.value)} placeholder="admin@mobiflow.local" />
+        </label>
+        <label>
+          Password
+          <input
+            type="password"
+            value={loginPassword}
+            onChange={(event) => onPassword(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") onLogin();
+            }}
+          />
         </label>
         <button className="primary" onClick={onLogin}>Login</button>
       </section>
@@ -895,7 +967,8 @@ function StepCard({
   onDuplicate,
   onDelete,
   onMoveUp,
-  onMoveDown
+  onMoveDown,
+  readOnly = false
 }: {
   step: TransformationStep;
   index: number;
@@ -905,6 +978,7 @@ function StepCard({
   onDelete: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
+  readOnly?: boolean;
 }) {
   return (
     <article className={`stepCard ${step.is_enabled ? "" : "disabled"}`}>
@@ -914,16 +988,16 @@ function StepCard({
           <strong>{step.step_name}</strong>
           <small>{STEP_TYPES.find((item) => item.type === step.step_type)?.description}</small>
         </div>
-        <label className="toggle"><input type="checkbox" checked={step.is_enabled} onChange={(event) => onChange({ ...step, is_enabled: event.target.checked })} />Enabled</label>
+        <label className="toggle"><input type="checkbox" disabled={readOnly} checked={step.is_enabled} onChange={(event) => onChange({ ...step, is_enabled: event.target.checked })} />Enabled</label>
       </div>
-      <StepForm step={step} columns={columns} onChange={onChange} />
-      <label>Step note<input value={step.note ?? ""} onChange={(event) => onChange({ ...step, note: event.target.value })} placeholder="Standardize phone format" /></label>
-      <div className="stepActions">
+      <StepForm step={step} columns={columns} onChange={readOnly ? () => undefined : onChange} />
+      <label>Step note<input readOnly={readOnly} value={step.note ?? ""} onChange={(event) => onChange({ ...step, note: event.target.value })} placeholder="Standardize phone format" /></label>
+      {!readOnly && <div className="stepActions">
         <button className="ghost small" onClick={onMoveUp} title="Move up">↑</button>
         <button className="ghost small" onClick={onMoveDown} title="Move down">↓</button>
         <button className="ghost small" onClick={onDuplicate}>Duplicate</button>
         <button className="ghost small" onClick={onDelete}>Delete</button>
-      </div>
+      </div>}
     </article>
   );
 }
@@ -1021,11 +1095,14 @@ function OperandEditor({ label, operand, columns, onChange }: { label: string; o
   </div>;
 }
 
-function PreviewPanel({ tab, onTab, preview, validation, sampleSize, onSampleSize, previewStepId, onPreviewStepId, steps }: { tab: "input" | "output" | "validation" | "notes"; onTab: (tab: "input" | "output" | "validation" | "notes") => void; preview: TransformationPreview | null; validation: ValidationResult | null; sampleSize: number; onSampleSize: (value: number) => void; previewStepId: string; onPreviewStepId: (value: string) => void; steps: TransformationStep[] }) {
+function PreviewPanel({ tab, onTab, onClose, preview, validation, sampleSize, onSampleSize, previewStepId, onPreviewStepId, steps }: { tab: "input" | "output" | "validation" | "notes"; onTab: (tab: "input" | "output" | "validation" | "notes") => void; onClose: () => void; preview: TransformationPreview | null; validation: ValidationResult | null; sampleSize: number; onSampleSize: (value: number) => void; previewStepId: string; onPreviewStepId: (value: string) => void; steps: TransformationStep[] }) {
   const rows = preview?.rows ?? [];
   const columns = rows[0] ? Object.keys(rows[0]) : [];
   return <section className="previewPanel">
-    <div className="previewTabs">{(["input", "output", "validation", "notes"] as const).map((item) => <button className={tab === item ? "active" : ""} key={item} onClick={() => onTab(item)}>{humanize(item)}</button>)}</div>
+    <div className="previewHeader">
+      <div className="previewTabs">{(["input", "output", "validation", "notes"] as const).map((item) => <button className={tab === item ? "active" : ""} key={item} onClick={() => onTab(item)}>{humanize(item)}</button>)}</div>
+      <button className="ghost small" onClick={onClose}>Close</button>
+    </div>
     <div className="previewControls">
       <label>Sample<select value={sampleSize} onChange={(event) => onSampleSize(Number(event.target.value))}>{[20, 50, 100].map((size) => <option key={size}>{size}</option>)}</select></label>
       <label>Until step<select value={previewStepId} onChange={(event) => onPreviewStepId(event.target.value)}><option value="">All steps</option>{steps.map((step, index) => <option key={step.id} value={step.id}>{index + 1}. {step.step_name}</option>)}</select></label>
@@ -1095,7 +1172,8 @@ function ConnectorCatalog({
   onCreate,
   onDelete,
   onEdit,
-  onSelect
+  onSelect,
+  readOnly = false
 }: {
   title: string;
   eyebrow: string;
@@ -1110,6 +1188,7 @@ function ConnectorCatalog({
   onDelete: (id: number) => void;
   onEdit: (resource: Resource) => void;
   onSelect: (connector: Connector) => void;
+  readOnly?: boolean;
 }) {
   const selected = connectors.find((connector) => connector.key === selectedKey);
   return (
@@ -1140,7 +1219,7 @@ function ConnectorCatalog({
               <p className="eyebrow">Configure</p>
               <h2>{selected.name}</h2>
             </div>
-            <button className="primary" onClick={onCreate}>Create {selected.type === "source" ? "datasource" : "destination"}</button>
+            {!readOnly && <button className="primary" onClick={onCreate}>Create {selected.type === "source" ? "datasource" : "destination"}</button>}
           </div>
           <div className="formGrid two">
             <label>
@@ -1170,8 +1249,8 @@ function ConnectorCatalog({
             <span>{resource.connection_count} connections</span>
             <span>{resource.last_sync || "-"}</span>
             <span>{resource.status}</span>
-            <button className="ghost small" onClick={() => onEdit(resource)}>Edit</button>
-            <button className="ghost small" onClick={() => onDelete(resource.id)}>Delete</button>
+            {!readOnly && <button className="ghost small" onClick={() => onEdit(resource)}>Edit</button>}
+            {!readOnly && <button className="ghost small" onClick={() => onDelete(resource.id)}>Delete</button>}
           </div>
         ))}
       </div>
@@ -1362,12 +1441,16 @@ function sampleConfig(connector: Connector) {
   return JSON.stringify(sample, null, 2);
 }
 
+function refreshedConfig(current: string, connector?: Connector) {
+  return connector && current.includes("10.10.0.10") ? sampleConfig(connector) : current;
+}
+
 function sampleConfigForKey(key: string) {
   if (key.includes("sftp")) {
     return JSON.stringify({
-      host: "10.10.0.10",
+      host: "",
       port: 22,
-      username: "etl_user",
+      username: "",
       password: "",
       remote_path: "/data/file.csv",
       operation: key.includes("destination") ? "write" : "read",
@@ -1375,12 +1458,12 @@ function sampleConfigForKey(key: string) {
     }, null, 2);
   }
   return JSON.stringify({
-    host: "10.10.0.10",
+    host: "",
     port: 5432,
-    database: "appdb",
+    database: "",
     schema: "public",
     table: "customers",
-    username: "postgres",
+    username: "",
     password: ""
   }, null, 2);
 }
@@ -1414,25 +1497,69 @@ function placeholderFor(key: string, schema: SchemaProperty) {
   return humanize(key);
 }
 
-function loadSessionUser(): User | null {
+function loadSession(): AuthSession | null {
   try {
     const raw = localStorage.getItem(SESSION_KEY);
-    return raw ? JSON.parse(raw) as User : null;
+    return raw ? JSON.parse(raw) as AuthSession : null;
   } catch {
     return null;
   }
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await request(path, init);
+  return response.json();
+}
+
+async function apiText(path: string, init?: RequestInit): Promise<string> {
+  const response = await request(path, init);
+  return response.text();
+}
+
+async function request(path: string, init?: RequestInit): Promise<Response> {
+  const session = loadSession();
+  const headers = new Headers(init?.headers);
+  headers.set("Content-Type", "application/json");
+  if (session?.token) headers.set("Authorization", `Bearer ${session.token}`);
   const response = await fetch(`${API}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...init
+    ...init,
+    headers
   });
   if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(detail);
+    if (response.status === 401) {
+      localStorage.removeItem(SESSION_KEY);
+    }
+    throw new Error(await readableError(response));
   }
-  return response.json();
+  return response;
+}
+
+async function readableError(response: Response): Promise<string> {
+  const fallback = response.status === 401
+    ? "Invalid email or password"
+    : response.status === 403
+      ? "You do not have permission to perform this action"
+      : "Request failed. Please try again.";
+  try {
+    const payload = await response.json();
+    if (typeof payload.detail === "string") return payload.detail;
+    if (Array.isArray(payload.detail)) {
+      return payload.detail
+        .map((item: { loc?: unknown[]; msg?: string }) => {
+          const location = Array.isArray(item.loc) ? item.loc.filter((part: unknown) => part !== "body").join(".") : "";
+          return `${location ? `${location}: ` : ""}${item.msg ?? "Invalid value"}`;
+        })
+        .join("; ");
+    }
+  } catch {
+    try {
+      const text = await response.text();
+      if (text) return text;
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
 }
 
 createRoot(document.getElementById("root")!).render(<App />);

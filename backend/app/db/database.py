@@ -2,8 +2,10 @@ import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
+from urllib.parse import urlparse
 
 from app.core.config import get_settings
+from app.core.security import hash_password
 
 
 def _pg_sql(sql: str) -> str:
@@ -148,15 +150,84 @@ def init_db() -> None:
                 duration_ms INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS auth_sessions (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                token_hash TEXT NOT NULL UNIQUE,
+                expires_at TEXT NOT NULL,
+                revoked_at TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             """
         )
+        conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT")
+        settings = get_settings()
+        bootstrap_hash = hash_password(settings.bootstrap_admin_password) if settings.bootstrap_admin_password else None
         conn.execute(
             """
-            INSERT INTO users (name, email, role)
-            SELECT ?, ?, ?
+            INSERT INTO users (name, email, role, password_hash)
+            SELECT ?, ?, ?, ?
             WHERE NOT EXISTS (SELECT 1 FROM users WHERE email=?)
             """,
-            ("Admin", "admin@mobiflow.local", "admin", "admin@mobiflow.local"),
+            ("Admin", settings.bootstrap_admin_email, "admin", bootstrap_hash, settings.bootstrap_admin_email),
+        )
+        if bootstrap_hash:
+            conn.execute(
+                """
+                UPDATE users
+                SET password_hash=?
+                WHERE email=? AND (password_hash IS NULL OR password_hash='')
+                """,
+                (bootstrap_hash, settings.bootstrap_admin_email),
+            )
+        _sync_postgres_connection_configs(conn, settings.metadata_database_url)
+
+
+def _sync_postgres_connection_configs(conn: PgDb, database_url: str) -> None:
+    parsed = urlparse(database_url)
+    defaults = {
+        "host": parsed.hostname or "",
+        "port": parsed.port or 5432,
+        "database": parsed.path.lstrip("/"),
+        "username": parsed.username or "",
+        "password": parsed.password or "",
+    }
+    resource_rows = conn.execute(
+        """
+        SELECT id, config
+        FROM resources
+        WHERE connector_key IN ('postgres_source', 'postgres_destination')
+        """
+    ).fetchall()
+    for row in resource_rows:
+        config = decode(dict(row)["config"])
+        if not isinstance(config, dict):
+            continue
+        next_config = {**config, **defaults}
+        conn.execute("UPDATE resources SET config=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (encode(next_config), dict(row)["id"]))
+    pipeline_rows = conn.execute(
+        """
+        SELECT id, source_key, destination_key, source_config, destination_config
+        FROM pipelines
+        WHERE source_key='postgres_source' OR destination_key='postgres_destination'
+        """
+    ).fetchall()
+    for row in pipeline_rows:
+        data = dict(row)
+        source_config = decode(data["source_config"])
+        destination_config = decode(data["destination_config"])
+        if data["source_key"] == "postgres_source" and isinstance(source_config, dict):
+            source_config = {**source_config, **defaults}
+        if data["destination_key"] == "postgres_destination" and isinstance(destination_config, dict):
+            destination_config = {**destination_config, **defaults}
+        conn.execute(
+            """
+            UPDATE pipelines
+            SET source_config=?, destination_config=?, updated_at=CURRENT_TIMESTAMP
+            WHERE id=?
+            """,
+            (encode(source_config), encode(destination_config), data["id"]),
         )
 
 

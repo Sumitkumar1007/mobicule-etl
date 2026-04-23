@@ -13,7 +13,7 @@ MobiFlow ETL is a UI-driven ETL control plane. Users create datasources, destina
 
 ## Current MVP Features
 
-- Login screen without password, using users from Access Control.
+- Password login with backend-issued bearer tokens, logout, and admin-only user creation.
 - Replaceable brand logo in sidebar and login page.
 - Datasource and destination management.
 - Transformation Builder with schema explorer, step cards, preview, validation, draft, and publish.
@@ -54,9 +54,20 @@ Then edit the database URL:
 
 ```bash
 MOBIFLOW_METADATA_DATABASE_URL=postgresql://postgres:password@host:5432/mobiflow
+MOBIFLOW_BOOTSTRAP_ADMIN_EMAIL=admin@mobiflow.local
+MOBIFLOW_BOOTSTRAP_ADMIN_PASSWORD=change-me-with-strong-password
 ```
 
-The current local app reads this value from `.env`.
+The current local app reads these values from `.env`. On first backend start, the bootstrap admin user is created. If the admin already exists and has no password hash, the backend sets this password during startup.
+
+For this local workspace, the bootstrap login is:
+
+```text
+Email: admin@mobiflow.local
+Password: ChangeMe@12345!
+```
+
+Change `MOBIFLOW_BOOTSTRAP_ADMIN_PASSWORD` before production.
 
 ## Quick Start
 
@@ -177,6 +188,7 @@ The scheduler scans every 15 seconds and enqueues matching pipelines once per mi
 
 ## Notes
 
-- Login is local UI session only. It is useful for MVP workflow separation, not production authentication.
+- Backend APIs require `Authorization: Bearer <token>` except `/api/health` and `/api/auth/login`.
+- Passwords are stored as salted PBKDF2-SHA256 hashes. Session tokens are stored hashed and expire by `MOBIFLOW_AUTH_TOKEN_TTL_HOURS`.
 - Secrets are currently stored in metadata config. Use a vault before production.
 - The scheduler is in-process. Use a dedicated worker/scheduler service for HA production deployments.

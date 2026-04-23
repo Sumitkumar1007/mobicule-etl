@@ -170,3 +170,14 @@ class UserCreate(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     email: str
     role: UserRole = "viewer"
+    password: str = Field(min_length=10, max_length=128)
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class AuthResponse(BaseModel):
+    token: str
+    user: User

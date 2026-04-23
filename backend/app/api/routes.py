@@ -25,6 +25,7 @@ from app.models.schemas import (
     TransformationPreviewResponse,
     TransformationUpdate,
     TransformationValidationResponse,
+    TransformationVersion,
     User,
     UserCreate,
 )
@@ -218,6 +219,19 @@ def transformations() -> list[Transformation]:
     with db() as conn:
         rows = conn.execute("SELECT * FROM transformations ORDER BY id DESC").fetchall()
     return [_transformation_from_row(row) for row in rows]
+
+
+@router.get("/transformation-versions", response_model=list[TransformationVersion])
+def transformation_versions() -> list[TransformationVersion]:
+    with db() as conn:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM transformation_versions
+            ORDER BY transformation_id DESC, version_no DESC
+            """
+        ).fetchall()
+    return [_transformation_version_from_row(row) for row in rows]
 
 
 @router.post("/transformations", response_model=Transformation)
@@ -587,6 +601,12 @@ def _transformation_from_row(row) -> Transformation:
     data = dict(row)
     data["steps"] = decode(data["steps"])
     return Transformation(**data)
+
+
+def _transformation_version_from_row(row) -> TransformationVersion:
+    data = dict(row)
+    data["snapshot_data"] = decode(data["snapshot_data"])
+    return TransformationVersion(**data)
 
 
 def _pipeline_from_row(row) -> Pipeline:

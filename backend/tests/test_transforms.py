@@ -41,3 +41,46 @@ def test_ui_steps_cast_fill_derive_filter_deduplicate_sort():
         ],
     )
     assert result == [{"id": "2", "name": "Ada", "amount": 10.0, "discount": 2.0, "city": "UNKNOWN", "net_amount": 8.0}]
+
+
+def test_filter_like_and_not_like():
+    rows = [
+        {"id": 1, "name": "Ada Lovelace"},
+        {"id": 2, "name": "Grace Hopper"},
+        {"id": 3, "name": "Alan Turing"},
+    ]
+
+    like_result = apply_transforms(
+        rows,
+        [{"id": "s1", "step_type": "filter", "step_name": "Filter Rows", "parameters": {"conditions": [{"column": "name", "operator": "like", "value": "%a%"}]}}],
+    )
+    not_like_result = apply_transforms(
+        rows,
+        [{"id": "s1", "step_type": "filter", "step_name": "Filter Rows", "parameters": {"conditions": [{"column": "name", "operator": "not_like", "value": "%a%"}]}}],
+    )
+
+    assert like_result == [{"id": 1, "name": "Ada Lovelace"}, {"id": 2, "name": "Grace Hopper"}, {"id": 3, "name": "Alan Turing"}]
+    assert not_like_result == []
+
+
+def test_derived_column_output_type():
+    rows = [{"amount": "10.25", "discount": "2.25"}]
+    result = apply_transforms(
+        rows,
+        [
+            {
+                "id": "s1",
+                "step_type": "derive",
+                "step_name": "Add Derived Column",
+                "parameters": {
+                    "output_column": "net_amount",
+                    "output_type": "integer",
+                    "left": {"kind": "column", "value": "amount"},
+                    "operator": "-",
+                    "right": {"kind": "column", "value": "discount"},
+                },
+            }
+        ],
+    )
+
+    assert result == [{"amount": "10.25", "discount": "2.25", "net_amount": 8}]

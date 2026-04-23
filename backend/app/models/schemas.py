@@ -101,6 +101,15 @@ class Transformation(TransformationCreate):
     updated_at: str
 
 
+class TransformationVersion(BaseModel):
+    id: int
+    transformation_id: int
+    version_no: int
+    snapshot_data: dict[str, Any]
+    published_by: str | None = None
+    published_at: str
+
+
 class TransformationPreviewRequest(BaseModel):
     sample_size: int = Field(default=50, ge=1, le=100)
     until_step_id: str | None = None

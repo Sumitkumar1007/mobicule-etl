@@ -118,20 +118,7 @@ class TransformationExecutor:
             target_type = item.get("type")
             if column not in result.columns:
                 raise ValueError(f"Unknown column {column}")
-            if target_type == "integer":
-                result[column] = pd.to_numeric(result[column], errors="coerce").astype("Int64")
-            elif target_type == "float":
-                result[column] = pd.to_numeric(result[column], errors="coerce")
-            elif target_type == "boolean":
-                result[column] = result[column].map(_to_bool)
-            elif target_type == "date":
-                result[column] = pd.to_datetime(result[column], errors="coerce").dt.date
-            elif target_type == "datetime":
-                result[column] = pd.to_datetime(result[column], errors="coerce")
-            elif target_type == "string":
-                result[column] = result[column].astype("string")
-            else:
-                raise ValueError(f"Unsupported cast type {target_type}")
+            result[column] = _cast_series(result[column], target_type)
         return result
 
     def apply_fillna(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
@@ -173,6 +160,9 @@ class TransformationExecutor:
             result[output_column] = pd.to_numeric(left, errors="coerce") / pd.to_numeric(right, errors="coerce").replace(0, pd.NA)
         else:
             raise ValueError(f"Unsupported formula operator {operator}")
+        output_type = params.get("output_type")
+        if output_type:
+            result[output_column] = _cast_series(result[output_column], output_type)
         return result
 
     def apply_filter(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
@@ -331,6 +321,10 @@ def _condition_mask(df: pd.DataFrame, condition: dict[str, Any]) -> pd.Series:
         return pd.to_numeric(series, errors="coerce") < float(value)
     if operator == "contains":
         return series.astype("string").str.contains(str(value), na=False, regex=False)
+    if operator == "like":
+        return _like_mask(series, value)
+    if operator == "not_like":
+        return ~_like_mask(series, value)
     if operator == "starts_with":
         return series.astype("string").str.startswith(str(value), na=False)
     if operator == "is_null":
@@ -341,6 +335,36 @@ def _condition_mask(df: pd.DataFrame, condition: dict[str, Any]) -> pd.Series:
         values = [item.strip() for item in str(value).split(",") if item.strip()]
         return series.astype("string").isin(values)
     raise ValueError(f"Unsupported filter operator {operator}")
+
+
+def _cast_series(series: pd.Series, target_type: Any) -> pd.Series:
+    if target_type == "integer":
+        return pd.to_numeric(series, errors="coerce").astype("Int64")
+    if target_type == "float":
+        return pd.to_numeric(series, errors="coerce")
+    if target_type == "boolean":
+        return series.map(_to_bool)
+    if target_type == "date":
+        return pd.to_datetime(series, errors="coerce").dt.date
+    if target_type == "datetime":
+        return pd.to_datetime(series, errors="coerce")
+    if target_type == "string":
+        return series.astype("string")
+    raise ValueError(f"Unsupported cast type {target_type}")
+
+
+def _like_mask(series: pd.Series, value: Any) -> pd.Series:
+    text = str(value)
+    if "%" not in text and "_" not in text:
+        return series.astype("string").str.contains(text, na=False, regex=False)
+    regex = "".join(".*" if char == "%" else "." if char == "_" else _escape_regex(char) for char in text)
+    return series.astype("string").str.match(f"^{regex}$", na=False)
+
+
+def _escape_regex(char: str) -> str:
+    if char in r"\.^$*+?{}[]|()":
+        return "\\" + char
+    return char
 
 
 def _to_bool(value: Any) -> bool | None:

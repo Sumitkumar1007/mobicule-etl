@@ -103,6 +103,14 @@ type Transformation = {
   created_at: string;
   updated_at: string;
 };
+type TransformationVersion = {
+  id: number;
+  transformation_id: number;
+  version_no: number;
+  snapshot_data: Transformation;
+  published_by?: string | null;
+  published_at: string;
+};
 type TransformationPreview = {
   input_rows: number;
   output_rows: number;
@@ -126,6 +134,7 @@ function App() {
   const [destinationResources, setDestinationResources] = useState<Resource[]>([]);
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [transformations, setTransformations] = useState<Transformation[]>([]);
+  const [transformationVersions, setTransformationVersions] = useState<TransformationVersion[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
   const [logs, setLogs] = useState<RunLog[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -184,14 +193,16 @@ function App() {
     }),
     [pipelines, runs]
   );
+  const selectedTransformationVersions = transformationVersions.filter((item) => String(item.transformation_id) === form.transformation_id);
 
   async function refresh() {
-    const [connectorData, sourceData, destinationData, pipelineData, transformationData, runData, userData] = await Promise.all([
+    const [connectorData, sourceData, destinationData, pipelineData, transformationData, transformationVersionData, runData, userData] = await Promise.all([
       api<Connector[]>("/connectors"),
       api<Resource[]>("/sources"),
       api<Resource[]>("/destinations"),
       api<Pipeline[]>("/pipelines"),
       api<Transformation[]>("/transformations"),
+      api<TransformationVersion[]>("/transformation-versions"),
       api<Run[]>("/runs"),
       isAdmin ? api<User[]>("/users") : Promise.resolve([])
     ]);
@@ -200,6 +211,7 @@ function App() {
     setDestinationResources(destinationData);
     setPipelines(pipelineData);
     setTransformations(transformationData);
+    setTransformationVersions(transformationVersionData);
     setRuns(runData);
     setUsers(userData);
     setForm((current) => ({
@@ -248,13 +260,16 @@ function App() {
       throw new Error("Select datasource and destination first");
     }
     const selectedTransformation = transformations.find((item) => String(item.id) === form.transformation_id);
+    const selectedVersion = transformationVersions.find(
+      (item) => String(item.transformation_id) === form.transformation_id && String(item.version_no) === form.transformation_version
+    );
     const payload = {
       name: form.name,
       source_key: selectedSource.connector_key,
       destination_key: selectedDestination.connector_key,
       source_config: selectedSource.config,
       destination_config: selectedDestination.config,
-      transforms: selectedTransformation?.steps ?? [],
+      transforms: selectedVersion ? stepsFromVersion(selectedVersion) : selectedTransformation?.steps ?? [],
       schedule: form.schedule
     };
     await api<Pipeline>(editingPipelineId ? `/pipelines/${editingPipelineId}` : "/pipelines", {
@@ -406,6 +421,23 @@ function App() {
     setPreviewData(null);
     setValidationData(null);
     setPreviewOpen(false);
+  }
+
+  function startNewTransformation() {
+    setActiveTransformationId(null);
+    setTransformationDraft({
+      name: "Customer cleanup",
+      description: "Standardize customer data before loading",
+      source_id: String(sourceResources[0]?.id ?? ""),
+      destination_id: String(destinationResources[0]?.id ?? ""),
+      status: "draft",
+      version: 1,
+      steps: defaultSteps()
+    });
+    setPreviewData(null);
+    setValidationData(null);
+    setPreviewOpen(false);
+    setPreviewStepId("");
   }
 
   function updateStep(stepId: string, updater: (step: TransformationStep) => TransformationStep) {
@@ -561,6 +593,7 @@ function App() {
               setResourceName(connector.name);
               setForm({ ...form, source_key: connector.key, source_config: sampleConfig(connector) });
             }}
+            isEditing={Boolean(editingResource)}
             readOnly={!isAdmin}
           />
         )}
@@ -588,6 +621,7 @@ function App() {
               setResourceName(connector.name);
               setForm({ ...form, destination_key: connector.key, destination_config: sampleConfig(connector) });
             }}
+            isEditing={Boolean(editingResource)}
             readOnly={!isAdmin}
           />
         )}
@@ -613,6 +647,10 @@ function App() {
               <label>
                 Existing
                 <select value={activeTransformationId ?? ""} onChange={(event) => {
+                  if (!event.target.value) {
+                    startNewTransformation();
+                    return;
+                  }
                   const selected = transformations.find((item) => String(item.id) === event.target.value);
                   if (selected) loadTransformation(selected);
                 }}>
@@ -727,7 +765,7 @@ function App() {
             </label>
             <label>
               Transformation
-              <select value={form.transformation_id} onChange={(event) => setForm({ ...form, transformation_id: event.target.value })}>
+              <select value={form.transformation_id} onChange={(event) => setForm({ ...form, transformation_id: event.target.value, transformation_version: "latest" })}>
                 <option value="">No transformation</option>
                 {transformations.filter((item) => item.status === "published").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
               </select>
@@ -736,7 +774,7 @@ function App() {
               Transformation version
               <select value={form.transformation_version} onChange={(event) => setForm({ ...form, transformation_version: event.target.value })}>
                 <option value="latest">Latest published</option>
-                {transformations.filter((item) => String(item.id) === form.transformation_id).map((item) => <option key={item.version} value={String(item.version)}>v{item.version}</option>)}
+                {selectedTransformationVersions.map((item) => <option key={item.id} value={String(item.version_no)}>v{item.version_no}</option>)}
               </select>
             </label>
           </div>
@@ -768,7 +806,7 @@ function App() {
                     source_id: String(findResourceId(sourceResources, pipeline.source_key, pipeline.source_config) ?? form.source_id),
                     destination_id: String(findResourceId(destinationResources, pipeline.destination_key, pipeline.destination_config) ?? form.destination_id),
                     transformation_id: String(findTransformationId(transformations, pipeline.transforms) ?? ""),
-                    transformation_version: "latest",
+                    transformation_version: String(findTransformationVersion(transformationVersions, pipeline.transforms) ?? "latest"),
                     source_key: pipeline.source_key,
                     destination_key: pipeline.destination_key,
                     source_config: JSON.stringify(pipeline.source_config, null, 2),
@@ -1063,7 +1101,7 @@ function StepForm({ step, columns, onChange }: { step: TransformationStep; colum
       <div className="ruleRow" key={idx}>
         <ColumnSelect value={item.column} columns={columns} onChange={(value) => setParams({ casts: updateArray(casts, idx, { ...item, column: value }) })} />
         <select value={item.type} onChange={(event) => setParams({ casts: updateArray(casts, idx, { ...item, type: event.target.value }) })}>
-          {["string", "integer", "float", "boolean", "date", "datetime"].map((type) => <option key={type} value={type}>{type}</option>)}
+          {DATA_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
         </select>
         <button className="ghost small" onClick={() => setParams({ casts: casts.filter((_, itemIndex) => itemIndex !== idx) })}>Delete</button>
       </div>
@@ -1087,6 +1125,7 @@ function StepForm({ step, columns, onChange }: { step: TransformationStep; colum
     const right = params.right as Operand ?? { kind: "constant", value: "" };
     return <div className="formulaGrid">
       <label>Output column<input value={String(params.output_column ?? "")} onChange={(event) => setParams({ ...params, output_column: event.target.value })} /></label>
+      <label>Derived column datatype<select value={String(params.output_type ?? "float")} onChange={(event) => setParams({ ...params, output_type: event.target.value })}>{DATA_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
       <OperandEditor label="Operand 1" operand={left} columns={columns} onChange={(value) => setParams({ ...params, left: value })} />
       <label>Operator<select value={String(params.operator ?? "+")} onChange={(event) => setParams({ ...params, operator: event.target.value })}>{["+", "-", "*", "/"].map((op) => <option key={op}>{op}</option>)}</select></label>
       <OperandEditor label="Operand 2" operand={right} columns={columns} onChange={(value) => setParams({ ...params, right: value })} />
@@ -1212,6 +1251,7 @@ function ConnectorCatalog({
   onDelete,
   onEdit,
   onSelect,
+  isEditing = false,
   readOnly = false
 }: {
   title: string;
@@ -1227,6 +1267,7 @@ function ConnectorCatalog({
   onDelete: (id: number) => void;
   onEdit: (resource: Resource) => void;
   onSelect: (connector: Connector) => void;
+  isEditing?: boolean;
   readOnly?: boolean;
 }) {
   const selected = connectors.find((connector) => connector.key === selectedKey);
@@ -1258,7 +1299,11 @@ function ConnectorCatalog({
               <p className="eyebrow">Configure</p>
               <h2>{selected.name}</h2>
             </div>
-            {!readOnly && <button className="primary" onClick={onCreate}>Create {selected.type === "source" ? "datasource" : "destination"}</button>}
+            {!readOnly && (
+              <button className="primary" onClick={onCreate}>
+                {isEditing ? "Update" : "Create"} {selected.type === "source" ? "datasource" : "destination"}
+              </button>
+            )}
           </div>
           <div className="formGrid two">
             <label>
@@ -1372,11 +1417,15 @@ const FILTER_OPERATORS = [
   { value: "greater_than", label: "greater than" },
   { value: "less_than", label: "less than" },
   { value: "contains", label: "contains" },
+  { value: "like", label: "like" },
+  { value: "not_like", label: "not like" },
   { value: "starts_with", label: "starts with" },
   { value: "is_null", label: "is null" },
   { value: "is_not_null", label: "is not null" },
   { value: "in_list", label: "in list" }
 ];
+
+const DATA_TYPES = ["string", "integer", "float", "boolean", "date", "datetime"];
 
 function defaultSteps(): TransformationStep[] {
   return [
@@ -1397,7 +1446,7 @@ function emptyStep(stepType: StepType): TransformationStep {
     rename: { mappings: [] },
     cast: { casts: [] },
     fillna: { fills: [] },
-    derive: { output_column: "", left: { kind: "column", value: "" }, operator: "+", right: { kind: "constant", value: "" } },
+    derive: { output_column: "", output_type: "float", left: { kind: "column", value: "" }, operator: "+", right: { kind: "constant", value: "" } },
     filter: { joiner: "and", conditions: [] },
     deduplicate: { columns: [], keep: "first" },
     sort: { column: "", ascending: true }
@@ -1428,6 +1477,14 @@ function findResourceId(resources: Resource[], connectorKey: string, config: Rec
 
 function findTransformationId(transformations: Transformation[], steps: Record<string, unknown>[]) {
   return transformations.find((item) => stableJson(item.steps) === stableJson(steps))?.id;
+}
+
+function findTransformationVersion(versions: TransformationVersion[], steps: Record<string, unknown>[]) {
+  return versions.find((item) => stableJson(stepsFromVersion(item)) === stableJson(steps))?.version_no;
+}
+
+function stepsFromVersion(version: TransformationVersion): TransformationStep[] {
+  return Array.isArray(version.snapshot_data?.steps) ? version.snapshot_data.steps : [];
 }
 
 function stableJson(value: unknown): string {

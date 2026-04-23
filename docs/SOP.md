@@ -184,6 +184,8 @@ Important SFTP note:
 
 Open `Transform`.
 
+For a full detailed guide, see [TRANSFORMATION_GUIDE.md](TRANSFORMATION_GUIDE.md).
+
 The screen has three areas:
 
 - Left: dataset and schema explorer.

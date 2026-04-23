@@ -40,6 +40,7 @@ frontend/
   src/styles.css               UI styling
 docs/
   SOP.md                       Detailed user guide
+  TRANSFORMATION_GUIDE.md      Detailed transformation builder guide
 ```
 
 ## Environment

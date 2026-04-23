@@ -158,12 +158,14 @@ def create_pipeline(payload: PipelineCreate, request: Request) -> Pipeline:
         row = conn.execute(
             """
             INSERT INTO pipelines
-            (name, source_key, destination_key, source_config, destination_config, transforms, schedule)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            (name, source_id, destination_id, source_key, destination_key, source_config, destination_config, transforms, schedule)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING *
             """,
             (
                 payload.name,
+                payload.source_id,
+                payload.destination_id,
                 payload.source_key,
                 payload.destination_key,
                 encode(payload.source_config),
@@ -186,13 +188,15 @@ def update_pipeline(pipeline_id: int, payload: PipelineUpdate, request: Request)
         row = conn.execute(
             """
             UPDATE pipelines
-            SET name=?, source_key=?, destination_key=?, source_config=?, destination_config=?,
+            SET name=?, source_id=?, destination_id=?, source_key=?, destination_key=?, source_config=?, destination_config=?,
                 transforms=?, schedule=?, enabled=?, updated_at=CURRENT_TIMESTAMP
             WHERE id=?
             RETURNING *
             """,
             (
                 data["name"],
+                data["source_id"],
+                data["destination_id"],
                 data["source_key"],
                 data["destination_key"],
                 encode(data["source_config"]),

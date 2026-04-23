@@ -63,6 +63,8 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS pipelines (
                 id SERIAL PRIMARY KEY,
                 name TEXT NOT NULL,
+                source_id INTEGER,
+                destination_id INTEGER,
                 source_key TEXT NOT NULL,
                 destination_key TEXT NOT NULL,
                 source_config TEXT NOT NULL,
@@ -162,6 +164,8 @@ def init_db() -> None:
             """
         )
         conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT")
+        conn.execute("ALTER TABLE pipelines ADD COLUMN IF NOT EXISTS source_id INTEGER REFERENCES resources(id) ON DELETE SET NULL")
+        conn.execute("ALTER TABLE pipelines ADD COLUMN IF NOT EXISTS destination_id INTEGER REFERENCES resources(id) ON DELETE SET NULL")
         settings = get_settings()
         bootstrap_hash = hash_password(settings.bootstrap_admin_password) if settings.bootstrap_admin_password else None
         conn.execute(

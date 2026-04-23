@@ -26,6 +26,8 @@ type SchemaProperty = {
 type Pipeline = {
   id: number;
   name: string;
+  source_id?: number | null;
+  destination_id?: number | null;
   source_key: string;
   destination_key: string;
   source_config: Record<string, unknown>;
@@ -218,8 +220,8 @@ function App() {
       ...current,
       source_config: refreshedConfig(current.source_config, connectorData.find((item) => item.key === current.source_key) ?? connectorData.find((item) => item.key === "postgres_source")),
       destination_config: refreshedConfig(current.destination_config, connectorData.find((item) => item.key === current.destination_key) ?? connectorData.find((item) => item.key === "postgres_destination")),
-      source_id: current.source_id || String(sourceData[0]?.id ?? ""),
-      destination_id: current.destination_id || String(destinationData[0]?.id ?? ""),
+      source_id: current.source_id || (editingPipelineId ? "" : String(sourceData[0]?.id ?? "")),
+      destination_id: current.destination_id || (editingPipelineId ? "" : String(destinationData[0]?.id ?? "")),
       transformation_id: current.transformation_id || String(transformationData.find((item) => item.status === "published")?.id ?? "")
     }));
     setTransformationDraft((current) => ({
@@ -265,6 +267,8 @@ function App() {
     );
     const payload = {
       name: form.name,
+      source_id: Number(selectedSource.id),
+      destination_id: Number(selectedDestination.id),
       source_key: selectedSource.connector_key,
       destination_key: selectedDestination.connector_key,
       source_config: selectedSource.config,
@@ -803,8 +807,8 @@ function App() {
                   setForm({
                     ...form,
                     name: pipeline.name,
-                    source_id: String(findResourceId(sourceResources, pipeline.source_key, pipeline.source_config) ?? form.source_id),
-                    destination_id: String(findResourceId(destinationResources, pipeline.destination_key, pipeline.destination_config) ?? form.destination_id),
+                    source_id: String(findResourceId(sourceResources, pipeline.source_key, pipeline.source_config, pipeline.source_id) ?? ""),
+                    destination_id: String(findResourceId(destinationResources, pipeline.destination_key, pipeline.destination_config, pipeline.destination_id) ?? ""),
                     transformation_id: String(findTransformationId(transformations, pipeline.transforms) ?? ""),
                     transformation_version: String(findTransformationVersion(transformationVersions, pipeline.transforms) ?? "latest"),
                     source_key: pipeline.source_key,
@@ -1470,9 +1474,10 @@ function transformationPayload(draft: { name: string; description: string; sourc
   };
 }
 
-function findResourceId(resources: Resource[], connectorKey: string, config: Record<string, unknown>) {
+function findResourceId(resources: Resource[], connectorKey: string, config: Record<string, unknown>, savedId?: number | null) {
+  if (savedId && resources.some((item) => item.id === savedId)) return savedId;
   return resources.find((item) => item.connector_key === connectorKey && stableJson(item.config) === stableJson(config))?.id
-    ?? resources.find((item) => item.connector_key === connectorKey)?.id;
+    ?? resources.find((item) => item.connector_key === connectorKey && resourceSignature(item.config) === resourceSignature(config))?.id;
 }
 
 function findTransformationId(transformations: Transformation[], steps: Record<string, unknown>[]) {
@@ -1489,6 +1494,12 @@ function stepsFromVersion(version: TransformationVersion): TransformationStep[] 
 
 function stableJson(value: unknown): string {
   return JSON.stringify(value, Object.keys(flattenKeys(value)).sort());
+}
+
+function resourceSignature(config: Record<string, unknown>): string {
+  return ["host", "database", "schema", "table", "query", "remote_path", "format"]
+    .map((key) => String(config[key] ?? ""))
+    .join("|");
 }
 
 function flattenKeys(value: unknown, keys: Record<string, true> = {}) {

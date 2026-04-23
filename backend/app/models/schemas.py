@@ -40,6 +40,8 @@ class Resource(ResourceCreate):
 
 class PipelineCreate(BaseModel):
     name: str = Field(min_length=2, max_length=120)
+    source_id: int | None = None
+    destination_id: int | None = None
     source_key: str
     destination_key: str
     source_config: dict[str, Any] = Field(default_factory=dict)
@@ -50,6 +52,8 @@ class PipelineCreate(BaseModel):
 
 class PipelineUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=120)
+    source_id: int | None = None
+    destination_id: int | None = None
     source_key: str | None = None
     destination_key: str | None = None
     source_config: dict[str, Any] | None = None

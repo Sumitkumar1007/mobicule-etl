@@ -178,6 +178,11 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=10, max_length=128)
+
+
 class AuthResponse(BaseModel):
     token: str
     user: User

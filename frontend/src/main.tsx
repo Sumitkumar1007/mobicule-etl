@@ -132,6 +132,7 @@ function App() {
   const [selectedRun, setSelectedRun] = useState<number | null>(null);
   const [toast, setToast] = useState<Toast>(null);
   const [activeMenu, setActiveMenu] = useState<Menu>("datasources");
+  const [showPasswordPanel, setShowPasswordPanel] = useState(false);
   const [resourceName, setResourceName] = useState("");
   const [editingResource, setEditingResource] = useState<Resource | null>(null);
   const [editingPipelineId, setEditingPipelineId] = useState<number | null>(null);
@@ -155,6 +156,7 @@ function App() {
     steps: defaultSteps()
   });
   const [userForm, setUserForm] = useState({ name: "", email: "", password: "", role: "viewer" as User["role"] });
+  const [passwordForm, setPasswordForm] = useState({ current_password: "", new_password: "", confirm_password: "" });
   const [form, setForm] = useState({
     name: "Customer pipeline",
     source_id: "",
@@ -327,6 +329,22 @@ function App() {
     await refresh();
   }
 
+  async function changePassword() {
+    if (passwordForm.new_password !== passwordForm.confirm_password) {
+      throw new Error("New password and confirm password do not match");
+    }
+    await api<{ status: string }>("/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({
+        current_password: passwordForm.current_password,
+        new_password: passwordForm.new_password
+      })
+    });
+    setPasswordForm({ current_password: "", new_password: "", confirm_password: "" });
+    setShowPasswordPanel(false);
+    setToast({ tone: "ok", text: "Password changed" });
+  }
+
   async function saveTransformationDraft() {
     const payload = transformationPayload(transformationDraft);
     const saved = activeTransformationId
@@ -495,9 +513,30 @@ function App() {
           <div className="topbarActions">
             <span className="userBadge">{currentUser.name} · {currentUser.role}</span>
             {isAdmin && activeMenu === "pipelines" && <button className="primary" onClick={() => savePipeline().catch(showError)}>{editingPipelineId ? "Update pipeline" : "Save pipeline"}</button>}
+            <button className="ghost" onClick={() => setShowPasswordPanel((value) => !value)}>Change Password</button>
             <button className="ghost" onClick={logout}>Logout</button>
           </div>
         </header>
+
+        {showPasswordPanel && (
+          <section className="panel accountPanel">
+            <div className="panelHead">
+              <div>
+                <p className="eyebrow">Account</p>
+                <h2>Change Password</h2>
+              </div>
+            </div>
+            <div className="formGrid three">
+              <label>Current password<input type="password" value={passwordForm.current_password} onChange={(event) => setPasswordForm({ ...passwordForm, current_password: event.target.value })} /></label>
+              <label>New password<input type="password" minLength={10} value={passwordForm.new_password} onChange={(event) => setPasswordForm({ ...passwordForm, new_password: event.target.value })} /></label>
+              <label>Confirm password<input type="password" minLength={10} value={passwordForm.confirm_password} onChange={(event) => setPasswordForm({ ...passwordForm, confirm_password: event.target.value })} /></label>
+            </div>
+            <div className="actions">
+              <button className="primary" onClick={() => changePassword().catch(showError)}>Update password</button>
+              <button className="ghost" onClick={() => setShowPasswordPanel(false)}>Cancel</button>
+            </div>
+          </section>
+        )}
 
         {activeMenu === "datasources" && (
           <ConnectorCatalog

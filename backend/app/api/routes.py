@@ -6,6 +6,7 @@ from app.db.database import db, decode, encode
 from app.models.schemas import (
     ConnectorDefinition,
     AuthResponse,
+    ChangePasswordRequest,
     LoginRequest,
     MetadataRequest,
     Pipeline,
@@ -27,7 +28,7 @@ from app.models.schemas import (
     User,
     UserCreate,
 )
-from app.core.security import hash_password
+from app.core.security import hash_password, hash_token, verify_password
 from app.services.auth import bearer_token, current_user, login, logout, require_role
 from app.services.metadata import source_columns
 from app.services.runner import enqueue_run, extract, preview
@@ -58,6 +59,30 @@ def auth_logout(request: Request) -> dict[str, str]:
 @router.get("/auth/me", response_model=User)
 def auth_me(request: Request) -> User:
     return current_user(request)
+
+
+@router.post("/auth/change-password")
+def change_password(payload: ChangePasswordRequest, request: Request) -> dict[str, str]:
+    user = current_user(request)
+    with db() as conn:
+        row = conn.execute("SELECT password_hash FROM users WHERE id=?", (user.id,)).fetchone()
+        if row is None or not verify_password(payload.current_password, dict(row).get("password_hash")):
+            raise HTTPException(status_code=400, detail="Current password is incorrect")
+        conn.execute(
+            "UPDATE users SET password_hash=? WHERE id=?",
+            (hash_password(payload.new_password), user.id),
+        )
+        token = bearer_token(request)
+        if token:
+            conn.execute(
+                """
+                UPDATE auth_sessions
+                SET revoked_at=CURRENT_TIMESTAMP
+                WHERE user_id=? AND token_hash<>? AND revoked_at IS NULL
+                """,
+                (user.id, hash_token(token)),
+            )
+    return {"status": "password_changed"}
 
 
 @router.get("/connectors", response_model=list[ConnectorDefinition])

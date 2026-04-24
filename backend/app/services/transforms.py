@@ -16,8 +16,9 @@ STEP_ORDER = {
     "value_map": 8,
     "groupby": 9,
     "pivot": 10,
-    "deduplicate": 11,
-    "sort": 12,
+    "custom": 11,
+    "deduplicate": 12,
+    "sort": 13,
 }
 
 
@@ -104,6 +105,8 @@ class TransformationExecutor:
             return self.apply_groupby(df, params)
         if step_type == "pivot":
             return self.apply_pivot(df, params)
+        if step_type == "custom":
+            return self.apply_custom(df, params)
         if step_type == "deduplicate":
             return self.apply_deduplicate(df, params)
         if step_type == "sort":
@@ -280,6 +283,44 @@ class TransformationExecutor:
         pivoted.columns = [str(col) for col in pivoted.columns]
         return pivoted
 
+    def apply_custom(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
+        code = str(params.get("code") or "").strip()
+        if not code:
+            return df
+        safe_builtins = {
+            "abs": abs,
+            "all": all,
+            "any": any,
+            "bool": bool,
+            "dict": dict,
+            "enumerate": enumerate,
+            "float": float,
+            "int": int,
+            "len": len,
+            "list": list,
+            "max": max,
+            "min": min,
+            "range": range,
+            "set": set,
+            "sorted": sorted,
+            "str": str,
+            "sum": sum,
+            "tuple": tuple,
+            "zip": zip,
+        }
+        globals_scope = {"__builtins__": safe_builtins, "pd": pd}
+        locals_scope: dict[str, Any] = {"df": df.copy()}
+        exec(code, globals_scope, locals_scope)
+        result = locals_scope.get("result")
+        transform = locals_scope.get("transform")
+        if callable(transform):
+            result = transform(df.copy())
+        if result is None:
+            raise ValueError("Custom Transform must define transform(df) returning a DataFrame or assign result = df")
+        if not isinstance(result, pd.DataFrame):
+            raise ValueError("Custom Transform must return a pandas DataFrame")
+        return result
+
     def apply_deduplicate(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
         subset = [col for col in params.get("columns", []) if col in df.columns]
         keep = params.get("keep", "first")
@@ -335,6 +376,8 @@ def validate_transforms(columns: list[str], steps: list[dict[str, Any]], destina
             current.extend(item.get("output_column") or f"{item.get('column')}_{item.get('function')}" for item in params.get("aggregations", []) if item.get("column") and item.get("function"))
         elif step_type == "pivot" and params.get("index_columns"):
             current = list(params["index_columns"])
+        elif step_type == "custom":
+            warnings.append(f"Step {index} {step['step_name']} uses custom Python; downstream column validation may be incomplete")
         warnings.extend(validate_step_order(step, steps[: index - 1]))
     if destination_columns:
         missing_destination = [col for col in destination_columns if col not in current]
@@ -360,7 +403,7 @@ def normalize_step(step: dict[str, Any], index: int = 1) -> dict[str, Any]:
     if kind == "filter_equals":
         return _legacy(index, "filter", {"joiner": "and", "conditions": [{"column": step.get("field"), "operator": "equals", "value": step.get("value")}]})
     if kind == "python":
-        raise ValueError("Raw Python transforms are disabled. Use UI-derived formula steps.")
+        return _legacy(index, "custom", {"code": step.get("code", "")})
     raise ValueError(f"Unsupported step type: {kind}")
 
 
@@ -376,6 +419,7 @@ def human_step_name(step_type: str) -> str:
         "value_map": "Map Column Values",
         "groupby": "Group By",
         "pivot": "Pivot",
+        "custom": "Custom Transform",
         "deduplicate": "Remove Duplicates",
         "sort": "Sort Rows",
     }.get(step_type, step_type.title())
@@ -418,6 +462,9 @@ def _referenced_columns(step: dict[str, Any]) -> set[str]:
         return set(params.get("group_columns", [])) | {item.get("column") for item in params.get("aggregations", []) if item.get("column")}
     if step["step_type"] == "pivot":
         return set(params.get("index_columns", [])) | {col for col in (params.get("pivot_column"), params.get("value_column")) if col}
+    if step["step_type"] == "custom":
+        return set()
+    return set()
     if step["step_type"] == "deduplicate":
         return set(params.get("columns", []))
     if step["step_type"] == "sort":

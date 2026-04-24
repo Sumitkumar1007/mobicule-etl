@@ -568,7 +568,7 @@ textarea {
 
 .builderGrid {
   display: grid;
-  grid-template-columns: minmax(220px, 25%) minmax(360px, 45%) minmax(300px, 30%);
+  grid-template-columns: minmax(250px, 24%) minmax(0, 76%);
   gap: 14px;
   align-items: start;
 }
@@ -721,6 +721,30 @@ textarea {
 .ruleRow {
   grid-template-columns: minmax(120px, 1fr) minmax(120px, 1fr) minmax(120px, 1fr) auto;
   align-items: end;
+}
+
+.schemaPanel .formGrid.two {
+  align-items: start;
+}
+
+.schemaPanel label {
+  min-width: 0;
+  align-content: start;
+}
+
+.schemaPanel .ruleRow {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.selectOrInput {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.selectOrInput .ghost.small {
+  width: 100%;
 }
 
 .formulaGrid {
@@ -1192,8 +1216,12 @@ select {
 }
 
 .builderGrid {
-  grid-template-columns: minmax(250px, 22%) minmax(560px, 48%) minmax(320px, 30%);
+  grid-template-columns: minmax(250px, 24%) minmax(0, 76%);
   gap: 16px;
+}
+
+.builderCanvas {
+  grid-column: 2 / -1;
 }
 
 .schemaList button,
@@ -1456,17 +1484,38 @@ h2 {
   min-width: 0;
 }
 
+.shell.modalOpen .rail,
+.shell.modalOpen .workspace > :not(.previewModalBackdrop) {
+  filter: blur(8px);
+  transition: filter 160ms ease;
+}
+
+.previewModalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 19, 0.22);
+  backdrop-filter: blur(10px);
+}
+
+.previewModal {
+  width: min(1120px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  overflow: hidden;
+  border-radius: 20px;
+  box-shadow: 0 28px 80px rgba(16, 24, 20, 0.24);
+}
+
 .previewPanel {
   position: relative;
   z-index: 1;
-}
-
-.builderGrid.previewHidden {
-  grid-template-columns: minmax(250px, 24%) minmax(0, 76%);
-}
-
-.builderGrid.previewVisible {
-  grid-template-columns: minmax(250px, 22%) minmax(560px, 48%) minmax(320px, 30%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  border-radius: 20px;
+  padding: 22px;
 }
 
 .previewHeader {
@@ -1478,8 +1527,7 @@ h2 {
 }
 
 @media (max-width: 1280px) {
-  .builderGrid.previewHidden,
-  .builderGrid.previewVisible {
+  .builderGrid {
     grid-template-columns: 1fr;
   }
 }
@@ -1512,6 +1560,21 @@ h2 {
   .operandEditor,
   .roleGrid {
     grid-template-columns: 1fr;
+  }
+
+  .previewModalBackdrop {
+    padding: 12px;
+  }
+
+  .previewModal {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+  }
+
+  .previewPanel {
+    max-height: calc(100vh - 24px);
+    border-radius: 16px;
+    padding: 16px;
   }
 
   .topbar,

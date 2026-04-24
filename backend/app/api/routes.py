@@ -31,7 +31,7 @@ from app.models.schemas import (
 )
 from app.core.security import hash_password, hash_token, verify_password
 from app.services.auth import bearer_token, current_user, login, logout, require_role
-from app.services.metadata import source_columns
+from app.services.metadata import source_columns, source_options
 from app.services.runner import enqueue_run, extract, prepare_runtime_transforms, preview
 from app.services.transforms import preview_transforms, validate_transforms
 
@@ -244,11 +244,19 @@ def create_transformation(payload: TransformationCreate, request: Request) -> Tr
     with db() as conn:
         row = conn.execute(
             """
-            INSERT INTO transformations (name, description, source_id, destination_id, steps)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO transformations (name, description, source_id, destination_id, source_config, destination_config, steps)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             RETURNING *
             """,
-            (payload.name, payload.description, payload.source_id, payload.destination_id, encode([step.model_dump() for step in payload.steps])),
+            (
+                payload.name,
+                payload.description,
+                payload.source_id,
+                payload.destination_id,
+                encode(payload.source_config),
+                encode(payload.destination_config),
+                encode([step.model_dump() for step in payload.steps]),
+            ),
         ).fetchone()
     return _transformation_from_row(row)
 
@@ -277,7 +285,7 @@ def _update_transformation_record(transformation_id: int, payload: Transformatio
         row = conn.execute(
             """
             UPDATE transformations
-            SET name=?, description=?, source_id=?, destination_id=?, status=?, steps=?, updated_at=CURRENT_TIMESTAMP
+            SET name=?, description=?, source_id=?, destination_id=?, source_config=?, destination_config=?, status=?, steps=?, updated_at=CURRENT_TIMESTAMP
             WHERE id=?
             RETURNING *
             """,
@@ -286,6 +294,8 @@ def _update_transformation_record(transformation_id: int, payload: Transformatio
                 data["description"],
                 data["source_id"],
                 data["destination_id"],
+                encode(data["source_config"]),
+                encode(data["destination_config"]),
                 data["status"],
                 encode(data["steps"]),
                 transformation_id,
@@ -343,6 +353,7 @@ def delete_transformation_step(transformation_id: int, step_id: str, request: Re
 def preview_transformation(transformation_id: int, payload: TransformationPreviewRequest) -> TransformationPreviewResponse:
     transformation = get_transformation(transformation_id)
     source = _resource_by_id(transformation.source_id, "source")
+    source_config = _merged_resource_config(source.config, transformation.source_config)
     steps = [step.model_dump() for step in transformation.steps]
     if payload.until_step_id:
         selected_steps = []
@@ -351,10 +362,12 @@ def preview_transformation(transformation_id: int, payload: TransformationPrevie
             if step["id"] == payload.until_step_id:
                 break
         steps = selected_steps
-    rows = extract(source.connector_key, source.config)[: payload.sample_size]
     try:
-        result = preview_transforms(rows, prepare_runtime_transforms(steps))
+        rows = extract(source.connector_key, source_config)[: payload.sample_size]
+        result = preview_transforms(rows, prepare_runtime_transforms(steps, source.connector_key, source_config))
     except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     input_columns = list(rows[0].keys()) if rows else []
     output_columns = list(result.rows[0].keys()) if result.rows else []
@@ -374,14 +387,18 @@ def preview_transformation(transformation_id: int, payload: TransformationPrevie
 def validate_transformation(transformation_id: int) -> TransformationValidationResponse:
     transformation = get_transformation(transformation_id)
     source = _resource_by_id(transformation.source_id, "source")
+    source_config = _merged_resource_config(source.config, transformation.source_config)
     source_key = source.connector_key.replace("_destination", "_source")
-    columns = source_columns(source_key, source.config)
+    columns = source_columns(source_key, source_config)
     destination_columns: list[str] = []
     if transformation.destination_id:
         destination = _resource_by_id(transformation.destination_id, "destination")
         if destination.connector_key == "postgres_destination":
             try:
-                destination_columns = source_columns(destination.connector_key.replace("_destination", "_source"), destination.config)
+                destination_columns = source_columns(
+                    destination.connector_key.replace("_destination", "_source"),
+                    _merged_resource_config(destination.config, transformation.destination_config),
+                )
             except Exception:
                 destination_columns = []
     result = validate_transforms(columns, [step.model_dump() for step in transformation.steps], destination_columns)
@@ -533,6 +550,15 @@ def metadata_columns(payload: MetadataRequest) -> dict[str, object]:
     return {"columns": columns}
 
 
+@router.post("/metadata/options")
+def metadata_options(payload: MetadataRequest) -> dict[str, object]:
+    try:
+        options = source_options(payload.source_key, payload.source_config)
+    except Exception as exc:
+        return {"tables": [], "paths": [], "error": str(exc)}
+    return {"tables": options.get("tables", []), "paths": options.get("paths", [])}
+
+
 def _resources(kind: str) -> list[Resource]:
     with db() as conn:
         rows = conn.execute("SELECT * FROM resources WHERE type=? ORDER BY id DESC", (kind,)).fetchall()
@@ -606,8 +632,14 @@ def _resource_by_id(resource_id: int | None, kind: str) -> Resource:
 
 def _transformation_from_row(row) -> Transformation:
     data = dict(row)
+    data["source_config"] = decode(data.get("source_config") or "{}")
+    data["destination_config"] = decode(data.get("destination_config") or "{}")
     data["steps"] = decode(data["steps"])
     return Transformation(**data)
+
+
+def _merged_resource_config(base_config: dict, overrides: dict | None) -> dict:
+    return {**base_config, **(overrides or {})}
 
 
 def _transformation_version_from_row(row) -> TransformationVersion:

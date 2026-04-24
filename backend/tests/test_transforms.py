@@ -229,3 +229,50 @@ def test_pivot_count_distinct_can_use_index_as_value_column():
     )
 
     assert result == [{"apac_card_number": "1", "cards": 1, "loans": 1}, {"apac_card_number": "2", "cards": 1, "loans": 0}]
+
+
+def test_custom_transform_accepts_df_and_returns_next_step_input():
+    rows = [{"customer_id": "1", "amount": 10}, {"customer_id": "2", "amount": 20}]
+    result = apply_transforms(
+        rows,
+        [
+            {
+                "id": "custom",
+                "step_type": "custom",
+                "step_name": "Custom Transform",
+                "parameters": {
+                    "code": "\n".join([
+                        "def transform(df):",
+                        "    next_df = df.copy()",
+                        "    next_df['double_amount'] = next_df['amount'] * 2",
+                        "    return next_df",
+                    ])
+                },
+            },
+            {
+                "id": "select",
+                "step_type": "select",
+                "step_name": "Select Columns",
+                "parameters": {"columns": ["customer_id", "double_amount"]},
+            },
+        ],
+    )
+
+    assert result == [{"customer_id": "1", "double_amount": 20}, {"customer_id": "2", "double_amount": 40}]
+
+
+def test_custom_transform_supports_result_variable():
+    rows = [{"amount": 10}]
+    result = apply_transforms(
+        rows,
+        [
+            {
+                "id": "custom",
+                "step_type": "custom",
+                "step_name": "Custom Transform",
+                "parameters": {"code": "result = df.assign(net=df['amount'] - 1)"},
+            }
+        ],
+    )
+
+    assert result == [{"amount": 10, "net": 9}]

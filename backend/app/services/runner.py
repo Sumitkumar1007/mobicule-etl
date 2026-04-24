@@ -32,7 +32,7 @@ def enqueue_run(pipeline_id: int) -> int:
 
 def preview(source_key: str, source_config: dict[str, Any], transforms: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows = extract(source_key, source_config)
-    return preview_transforms(rows[:25], prepare_runtime_transforms(transforms)).rows[:25]
+    return preview_transforms(rows[:25], prepare_runtime_transforms(transforms, source_key, source_config)).rows[:25]
 
 
 def run_pipeline(run_id: int) -> None:
@@ -43,7 +43,7 @@ def run_pipeline(run_id: int) -> None:
         rows = extract(pipeline["source_key"], pipeline["source_config"])
         _update_counts(run_id, rows_read=len(rows))
         _log(run_id, "INFO", f"Extracted {len(rows)} rows")
-        result = preview_transforms(rows, prepare_runtime_transforms(pipeline["transforms"]))
+        result = preview_transforms(rows, prepare_runtime_transforms(pipeline["transforms"], pipeline["source_key"], pipeline["source_config"]))
         rows = result.rows
         for step_log in result.logs:
             _log(run_id, step_log.level, step_log.message)
@@ -214,7 +214,7 @@ def _load_sftp(config: dict[str, Any], rows: list[dict[str, Any]]) -> int:
         import paramiko
     except ImportError as exc:
         raise RuntimeError("paramiko is required for SFTP destination. Install backend requirements.") from exc
-    remote_path = _format_path_pattern(config.get("output_path_pattern") or config["remote_path"])
+    remote_path = config["remote_path"]
     if config.get("format") == "xlsx" or remote_path.endswith(".xlsx"):
         payload: str | bytes = _xlsx_from_rows(rows)
     else:
@@ -238,14 +238,20 @@ def _load_sftp(config: dict[str, Any], rows: list[dict[str, Any]]) -> int:
     return len(rows)
 
 
-def prepare_runtime_transforms(transforms: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def prepare_runtime_transforms(transforms: list[dict[str, Any]], base_source_key: str | None = None, base_source_config: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     prepared = copy.deepcopy(transforms)
     for step in prepared:
         step_type = step.get("step_type") or step.get("type")
         params = step.setdefault("parameters", {})
-        if step_type == "join" and params.get("right_source_id") and not params.get("right_rows"):
-            resource = _resource_for_join(int(params["right_source_id"]))
-            params["right_rows"] = extract(resource["connector_key"], resource["config"])
+        if step_type == "join" and not params.get("right_rows"):
+            if params.get("right_source_mode") == "same_connection":
+                if not base_source_key or not base_source_config:
+                    raise ValueError("Join source connection is not available")
+                right_config = _same_connection_join_config(base_source_key, base_source_config, params.get("right_source_config") or {})
+                params["right_rows"] = extract(base_source_key, right_config)
+            elif params.get("right_source_id"):
+                resource = _resource_for_join(int(params["right_source_id"]))
+                params["right_rows"] = extract(resource["connector_key"], resource["config"])
     return prepared
 
 
@@ -259,8 +265,53 @@ def _resource_for_join(resource_id: int) -> dict[str, Any]:
     return data
 
 
+def _same_connection_join_config(base_source_key: str, base_source_config: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(overrides, dict):
+        raise ValueError("Join source override config is invalid")
+    if base_source_key == "postgres_source":
+        next_config = dict(base_source_config)
+        for key in ("schema", "table", "query"):
+            value = overrides.get(key)
+            if value not in (None, ""):
+                next_config[key] = value
+        if next_config.get("query"):
+            next_config["table"] = overrides.get("table") or next_config.get("table", "")
+        elif not next_config.get("table"):
+            raise ValueError("Join source needs table or query")
+        return next_config
+    if base_source_key == "sftp_source":
+        next_config = dict(base_source_config)
+        base_remote_path = str(base_source_config.get("remote_path") or "")
+        remote_path_override = overrides.get("remote_path")
+        if remote_path_override not in (None, ""):
+            next_config["remote_path"] = _resolve_sftp_join_path(base_remote_path, str(remote_path_override))
+        next_config.pop("path_pattern", None)
+        format_override = overrides.get("format")
+        if format_override not in (None, ""):
+            next_config["format"] = format_override
+        next_config["operation"] = "read"
+        if not next_config.get("remote_path"):
+            raise ValueError("Join source needs remote path")
+        return next_config
+    return {**base_source_config, **overrides}
+
+
+def _resolve_sftp_join_path(base_remote_path: str, candidate: str) -> str:
+    if not candidate or candidate.startswith("/"):
+        return candidate
+    base = base_remote_path.rstrip("/")
+    if not base:
+        return candidate
+    return posixpath.join(base, candidate)
+
+
 def _sftp_read_paths(client, config: dict[str, Any]) -> list[str]:
-    pattern = config.get("path_pattern") or config.get("remote_path")
+    remote_path = config.get("remote_path")
+    if remote_path:
+        return [remote_path]
+    pattern = config.get("path_pattern")
+    if not pattern:
+        raise ValueError("SFTP source needs remote path")
     if not any(char in pattern for char in "*?[]"):
         return [pattern]
     directory = posixpath.dirname(pattern) or "."

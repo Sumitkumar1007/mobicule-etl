@@ -72,7 +72,7 @@ class Pipeline(PipelineCreate):
 
 class TransformationStep(BaseModel):
     id: str
-    step_type: Literal["select", "rename", "cast", "fillna", "derive", "filter", "deduplicate", "sort", "join", "groupby", "pivot", "value_map"]
+    step_type: Literal["select", "rename", "cast", "fillna", "derive", "filter", "deduplicate", "sort", "join", "groupby", "pivot", "value_map", "custom"]
     step_name: str
     is_enabled: bool = True
     note: str | None = None
@@ -84,6 +84,8 @@ class TransformationCreate(BaseModel):
     description: str = ""
     source_id: int | None = None
     destination_id: int | None = None
+    source_config: dict[str, Any] = Field(default_factory=dict)
+    destination_config: dict[str, Any] = Field(default_factory=dict)
     steps: list[TransformationStep] = Field(default_factory=list)
 
 
@@ -92,6 +94,8 @@ class TransformationUpdate(BaseModel):
     description: str | None = None
     source_id: int | None = None
     destination_id: int | None = None
+    source_config: dict[str, Any] | None = None
+    destination_config: dict[str, Any] | None = None
     status: Literal["draft", "published"] | None = None
     steps: list[TransformationStep] | None = None
 

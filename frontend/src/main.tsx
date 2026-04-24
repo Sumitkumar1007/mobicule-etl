@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
@@ -83,7 +83,7 @@ type User = {
 };
 type AuthSession = { token: string; user: User };
 
-type StepType = "select" | "rename" | "cast" | "fillna" | "derive" | "filter" | "deduplicate" | "sort" | "join" | "groupby" | "pivot" | "value_map";
+type StepType = "select" | "rename" | "cast" | "fillna" | "derive" | "filter" | "deduplicate" | "sort" | "join" | "groupby" | "pivot" | "value_map" | "custom";
 type Operand = { kind: "column" | "constant"; value: string };
 type TransformationStep = {
   id: string;
@@ -99,6 +99,8 @@ type Transformation = {
   description: string;
   source_id?: number | null;
   destination_id?: number | null;
+  source_config: Record<string, unknown>;
+  destination_config: Record<string, unknown>;
   status: "draft" | "published";
   version: number;
   steps: TransformationStep[];
@@ -149,6 +151,10 @@ function App() {
   const [editingPipelineId, setEditingPipelineId] = useState<number | null>(null);
   const [sourceColumns, setSourceColumns] = useState<string[]>([]);
   const [destinationColumns, setDestinationColumns] = useState<string[]>([]);
+  const [sourceTargetOptions, setSourceTargetOptions] = useState<{ tables: string[]; paths: string[] }>({ tables: [], paths: [] });
+  const [destinationTargetOptions, setDestinationTargetOptions] = useState<{ tables: string[]; paths: string[] }>({ tables: [], paths: [] });
+  const lastSourceOptionsKey = useRef("");
+  const lastDestinationOptionsKey = useRef("");
   const [columnSearch, setColumnSearch] = useState("");
   const [activeTransformationId, setActiveTransformationId] = useState<number | null>(null);
   const [previewData, setPreviewData] = useState<TransformationPreview | null>(null);
@@ -162,6 +168,8 @@ function App() {
     description: "Standardize customer data before loading",
     source_id: "",
     destination_id: "",
+    source_config: {} as Record<string, unknown>,
+    destination_config: {} as Record<string, unknown>,
     status: "draft" as Transformation["status"],
     version: 1,
     steps: defaultSteps()
@@ -234,9 +242,13 @@ function App() {
   useEffect(() => {
     if (!currentUser) return;
     refresh().catch(showError);
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser || activeMenu === "transforms") return;
     const timer = window.setInterval(() => refresh().catch(showError), 4000);
     return () => window.clearInterval(timer);
-  }, [currentUser]);
+  }, [currentUser, activeMenu]);
 
   useEffect(() => {
     if (currentUser && currentUser.role !== "admin" && activeMenu === "access") {
@@ -252,8 +264,29 @@ function App() {
   useEffect(() => {
     if (activeMenu !== "transforms" || !transformationDraft.source_id) return;
     const resource = sourceResources.find((item) => String(item.id) === transformationDraft.source_id);
-    if (resource) loadColumnsFor(resource, "source").catch(showError);
-  }, [activeMenu, transformationDraft.source_id, sourceResources]);
+    if (!resource || resource.connector_key === "sftp_source") return;
+    loadColumnsFor(resource, "source", transformationDraft.source_config).catch(showError);
+  }, [activeMenu, transformationDraft.source_id, transformationDraft.source_config, sourceResources]);
+
+  useEffect(() => {
+    if (activeMenu !== "transforms" || !transformationDraft.source_id) return;
+    const resource = sourceResources.find((item) => String(item.id) === transformationDraft.source_id);
+    if (!resource) return;
+    const key = `${resource.id}:${stableJson(transformationDraft.source_config)}`;
+    if (lastSourceOptionsKey.current === key) return;
+    lastSourceOptionsKey.current = key;
+    loadTargetOptions(resource, transformationDraft.source_config, "source").catch(showError);
+  }, [activeMenu, transformationDraft.source_id, transformationDraft.source_config, sourceResources]);
+
+  useEffect(() => {
+    if (activeMenu !== "transforms" || !transformationDraft.destination_id) return;
+    const resource = destinationResources.find((item) => String(item.id) === transformationDraft.destination_id);
+    if (!resource) return;
+    const key = `${resource.id}:${stableJson(transformationDraft.destination_config)}`;
+    if (lastDestinationOptionsKey.current === key) return;
+    lastDestinationOptionsKey.current = key;
+    loadTargetOptions(resource, transformationDraft.destination_config, "destination").catch(showError);
+  }, [activeMenu, transformationDraft.destination_id, transformationDraft.destination_config, destinationResources]);
 
   async function savePipeline() {
     const selectedSource = sourceResources.find((item) => String(item.id) === form.source_id);
@@ -265,14 +298,16 @@ function App() {
     const selectedVersion = transformationVersions.find(
       (item) => String(item.transformation_id) === form.transformation_id && String(item.version_no) === form.transformation_version
     );
+    const versionSnapshot = selectedVersion?.snapshot_data;
+    const effectiveTransformation = versionSnapshot ?? selectedTransformation;
     const payload = {
       name: form.name,
       source_id: Number(selectedSource.id),
       destination_id: Number(selectedDestination.id),
       source_key: selectedSource.connector_key,
       destination_key: selectedDestination.connector_key,
-      source_config: selectedSource.config,
-      destination_config: selectedDestination.config,
+      source_config: { ...selectedSource.config, ...(effectiveTransformation?.source_config ?? {}) },
+      destination_config: { ...selectedDestination.config, ...(effectiveTransformation?.destination_config ?? {}) },
       transforms: selectedVersion ? stepsFromVersion(selectedVersion) : selectedTransformation?.steps ?? [],
       schedule: form.schedule
     };
@@ -303,7 +338,7 @@ function App() {
       body: JSON.stringify({
         name: resourceName || fallbackName,
         connector_key: connectorKey,
-        config: parseJson(config)
+        config: sanitizeConnectorConfig(connectorKey, parseJson(config))
       })
     });
     setToast({ tone: "ok", text: `${kind === "source" ? "Datasource" : "Destination"} ${editingResource ? "updated" : "created"}` });
@@ -418,6 +453,8 @@ function App() {
       description: transformation.description,
       source_id: String(transformation.source_id ?? ""),
       destination_id: String(transformation.destination_id ?? ""),
+      source_config: transformation.source_config ?? {},
+      destination_config: transformation.destination_config ?? {},
       status: transformation.status,
       version: transformation.version,
       steps: transformation.steps.length ? transformation.steps : defaultSteps()
@@ -434,6 +471,8 @@ function App() {
       description: "Standardize customer data before loading",
       source_id: String(sourceResources[0]?.id ?? ""),
       destination_id: String(destinationResources[0]?.id ?? ""),
+      source_config: {},
+      destination_config: {},
       status: "draft",
       version: 1,
       steps: defaultSteps()
@@ -466,13 +505,32 @@ function App() {
     });
   }
 
-  async function loadColumnsFor(resource: Resource, target: "source" | "destination") {
+  async function loadColumnsFor(resource: Resource, target: "source" | "destination", overrides: Record<string, unknown> = {}) {
     const metadataKey = resource.connector_key.replace("_destination", "_source");
-    const payload = { source_key: metadataKey, source_config: resource.config };
+    const merged = { ...resource.config, ...overrides };
+    if (!canLoadColumns(resource.connector_key, merged)) {
+      if (target === "source") setSourceColumns([]);
+      else setDestinationColumns([]);
+      return;
+    }
+    const payload = { source_key: metadataKey, source_config: merged };
     const result = await api<{ columns: string[]; error?: string }>("/metadata/columns", { method: "POST", body: JSON.stringify(payload) });
     if (result.error) setToast({ tone: "bad", text: result.error });
     if (target === "source") setSourceColumns(result.columns);
     else setDestinationColumns(result.columns);
+  }
+
+  async function loadTargetOptions(resource: Resource, overrides: Record<string, unknown>, target: "source" | "destination") {
+    const metadataKey = resource.connector_key.replace("_destination", "_source");
+    const merged = { ...resource.config, ...overrides };
+    const result = await api<{ tables: string[]; paths: string[]; error?: string }>("/metadata/options", {
+      method: "POST",
+      body: JSON.stringify({ source_key: metadataKey, source_config: merged })
+    });
+    const next = { tables: result.tables ?? [], paths: result.paths ?? [] };
+    if (target === "source") setSourceTargetOptions(next);
+    else setDestinationTargetOptions(next);
+    if (result.error) setToast({ tone: "bad", text: result.error });
   }
 
   function showError(error: unknown) {
@@ -525,7 +583,7 @@ function App() {
   }
 
   return (
-    <main className="shell">
+    <main className={previewOpen ? "shell modalOpen" : "shell"}>
       <aside className="rail">
         <div className="brand">
           <LogoImage className="logoImage" />
@@ -665,21 +723,41 @@ function App() {
               <Status status={transformationDraft.status === "published" ? "succeeded" : "queued"} />
             </div>
 
-            <div className={previewOpen ? "builderGrid previewVisible" : "builderGrid previewHidden"}>
+            <div className="builderGrid">
               <SchemaExplorer
                 sourceResources={sourceResources}
                 destinationResources={destinationResources}
                 sourceId={transformationDraft.source_id}
                 destinationId={transformationDraft.destination_id}
+                sourceConfig={transformationDraft.source_config}
+                destinationConfig={transformationDraft.destination_config}
+                sourceOptions={sourceTargetOptions}
+                destinationOptions={destinationTargetOptions}
                 columns={sourceColumns}
                 search={columnSearch}
                 onSearch={setColumnSearch}
+                onLoadSourceSchema={() => {
+                  const resource = sourceResources.find((item) => String(item.id) === transformationDraft.source_id);
+                  if (resource) loadColumnsFor(resource, "source", transformationDraft.source_config).catch(showError);
+                }}
                 onSourceChange={(value) => {
                   const resource = sourceResources.find((item) => String(item.id) === value);
-                  setTransformationDraft({ ...transformationDraft, source_id: value });
-                  if (resource) loadColumnsFor(resource, "source").catch(showError);
+                  setTransformationDraft({ ...transformationDraft, source_id: value, source_config: {} });
+                  setSourceTargetOptions({ tables: [], paths: [] });
+                  lastSourceOptionsKey.current = "";
+                  if (resource && resource.connector_key !== "sftp_source") loadColumnsFor(resource, "source", {}).catch(showError);
                 }}
-                onDestinationChange={(value) => setTransformationDraft({ ...transformationDraft, destination_id: value })}
+                onDestinationChange={(value) => {
+                  setTransformationDraft({ ...transformationDraft, destination_id: value, destination_config: {} });
+                  setDestinationTargetOptions({ tables: [], paths: [] });
+                  lastDestinationOptionsKey.current = "";
+                }}
+                onSourceConfigChange={(value) => {
+                  const resource = sourceResources.find((item) => String(item.id) === transformationDraft.source_id);
+                  setTransformationDraft({ ...transformationDraft, source_config: value });
+                  if (resource && resource.connector_key !== "sftp_source") loadColumnsFor(resource, "source", value).catch(showError);
+                }}
+                onDestinationConfigChange={(value) => setTransformationDraft({ ...transformationDraft, destination_config: value })}
               />
 
               <section className="builderCanvas">
@@ -698,6 +776,7 @@ function App() {
                       index={index}
                       columns={sourceColumns}
                       sourceResources={sourceResources}
+                      activeSourceResource={sourceResources.find((item) => String(item.id) === transformationDraft.source_id)}
                       onChange={(next) => updateStep(step.id, () => next)}
                       onDuplicate={() => setTransformationDraft({ ...transformationDraft, steps: [...transformationDraft.steps, { ...step, id: makeId(), step_name: `${step.step_name} copy` }] })}
                       onDelete={() => setTransformationDraft({ ...transformationDraft, steps: transformationDraft.steps.filter((item) => item.id !== step.id) })}
@@ -708,21 +787,6 @@ function App() {
                   ))}
                 </div>
               </section>
-
-              {previewOpen && (
-                <PreviewPanel
-                  tab={previewTab}
-                  onTab={setPreviewTab}
-                  onClose={() => setPreviewOpen(false)}
-                  preview={previewData}
-                  validation={validationData}
-                  sampleSize={sampleSize}
-                  onSampleSize={setSampleSize}
-                  previewStepId={previewStepId}
-                  onPreviewStepId={setPreviewStepId}
-                  steps={transformationDraft.steps}
-                />
-              )}
             </div>
 
             <div className="executionSummary">
@@ -910,6 +974,24 @@ function App() {
             ))}
           </div>
         </section>}
+        {previewOpen && (
+          <div className="previewModalBackdrop" onClick={() => setPreviewOpen(false)}>
+            <div className="previewModal" onClick={(event) => event.stopPropagation()}>
+              <PreviewPanel
+                tab={previewTab}
+                onTab={setPreviewTab}
+                onClose={() => setPreviewOpen(false)}
+                preview={previewData}
+                validation={validationData}
+                sampleSize={sampleSize}
+                onSampleSize={setSampleSize}
+                previewStepId={previewStepId}
+                onPreviewStepId={setPreviewStepId}
+                steps={transformationDraft.steps}
+              />
+            </div>
+          </div>
+        )}
       </section>
       {toast && <button className={`toast ${toast.tone}`} onClick={() => setToast(null)}>{toast.text}</button>}
     </main>
@@ -921,21 +1003,35 @@ function SchemaExplorer({
   destinationResources,
   sourceId,
   destinationId,
+  sourceConfig,
+  destinationConfig,
+  sourceOptions,
+  destinationOptions,
   columns,
   search,
   onSearch,
+  onLoadSourceSchema,
   onSourceChange,
-  onDestinationChange
+  onDestinationChange,
+  onSourceConfigChange,
+  onDestinationConfigChange
 }: {
   sourceResources: Resource[];
   destinationResources: Resource[];
   sourceId: string;
   destinationId: string;
+  sourceConfig: Record<string, unknown>;
+  destinationConfig: Record<string, unknown>;
+  sourceOptions: { tables: string[]; paths: string[] };
+  destinationOptions: { tables: string[]; paths: string[] };
   columns: string[];
   search: string;
   onSearch: (value: string) => void;
+  onLoadSourceSchema: () => void;
   onSourceChange: (value: string) => void;
   onDestinationChange: (value: string) => void;
+  onSourceConfigChange: (value: Record<string, unknown>) => void;
+  onDestinationConfigChange: (value: Record<string, unknown>) => void;
 }) {
   const filtered = columns.filter((column) => column.toLowerCase().includes(search.toLowerCase()));
   const source = sourceResources.find((item) => String(item.id) === sourceId);
@@ -960,6 +1056,9 @@ function SchemaExplorer({
         <span>Source: {source?.name ?? "-"}</span>
         <span>Destination: {destination?.name ?? "-"}</span>
       </div>
+      {source && <DatasetTargetEditor title="Source target" resource={source} value={sourceConfig} options={sourceOptions} onChange={onSourceConfigChange} />}
+      {destination && <DatasetTargetEditor title="Destination target" resource={destination} value={destinationConfig} options={destinationOptions} onChange={onDestinationConfigChange} />}
+      <button className="ghost small" type="button" onClick={onLoadSourceSchema}>Load schema from source</button>
       <label>Search columns<input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="customer_id" /></label>
       <div className="schemaList">
         {filtered.map((column) => (
@@ -972,6 +1071,83 @@ function SchemaExplorer({
       </div>
     </section>
   );
+}
+
+function DatasetTargetEditor({ title, resource, value, options, onChange }: { title: string; resource: Resource; value: Record<string, unknown>; options: { tables: string[]; paths: string[] }; onChange: (value: Record<string, unknown>) => void }) {
+  if (resource.connector_key === "postgres_source") {
+    return <div className="formGrid two">
+      <label>{title} schema<input value={String(value.schema ?? "public")} onChange={(event) => onChange({ ...value, schema: event.target.value })} placeholder="public" /></label>
+      <label>{title} table<SelectOrInput value={String(value.table ?? "")} options={options.tables} placeholder="customers" onChange={(next) => onChange({ ...value, table: next })} /></label>
+      <label className="editor fullWidth">{title} query<textarea value={String(value.query ?? "")} onChange={(event) => onChange({ ...value, query: event.target.value })} placeholder="Optional custom SQL for source rows" /></label>
+    </div>;
+  }
+  if (resource.connector_key === "sftp_source") {
+    const fileOptions = sftpPathOptions(resource, options.paths, String(value.remote_path ?? ""));
+    return <div className="formGrid two">
+      <label>{title} file name<SelectOrInput value={String(value.remote_path ?? "")} options={fileOptions} placeholder="customers.csv" onChange={(next) => onChange({ ...value, remote_path: next })} /></label>
+      <label>{title} format<select value={String(value.format ?? "csv")} onChange={(event) => onChange({ ...value, format: event.target.value })}><option value="csv">csv</option><option value="xlsx">xlsx</option></select></label>
+    </div>;
+  }
+  if (resource.connector_key === "postgres_destination") {
+    return <div className="formGrid two">
+      <label>{title} schema<input value={String(value.schema ?? "public")} onChange={(event) => onChange({ ...value, schema: event.target.value })} placeholder="public" /></label>
+      <label>{title} table<SelectOrInput value={String(value.table ?? "")} options={options.tables} placeholder="customer_summary" onChange={(next) => onChange({ ...value, table: next })} /></label>
+      <label>Mode<select value={String(value.mode ?? "append")} onChange={(event) => onChange({ ...value, mode: event.target.value })}><option value="append">append</option><option value="upsert">upsert</option></select></label>
+      <label>Primary key<input value={String(value.primary_key ?? "")} onChange={(event) => onChange({ ...value, primary_key: event.target.value })} placeholder="customer_id" /></label>
+    </div>;
+  }
+  if (resource.connector_key === "sftp_destination") {
+    const fileOptions = sftpPathOptions(resource, options.paths, String(value.remote_path ?? ""));
+    return <div className="formGrid two">
+      <label>{title} output file name<SelectOrInput value={String(value.remote_path ?? "")} options={fileOptions} placeholder="result.csv" onChange={(next) => onChange({ ...value, remote_path: next })} /></label>
+      <label>{title} format<select value={String(value.format ?? "csv")} onChange={(event) => onChange({ ...value, format: event.target.value })}><option value="csv">csv</option><option value="xlsx">xlsx</option></select></label>
+    </div>;
+  }
+  return null;
+}
+
+function SelectOrInput({ value, options, placeholder, onChange }: { value: string; options: Array<string | { label: string; value: string }>; placeholder: string; onChange: (value: string) => void }) {
+  const normalizedOptions = options.map((item) => typeof item === "string" ? { label: item, value: item } : item);
+  const mergedOptions = value && !normalizedOptions.some((item) => item.value === value)
+    ? [{ label: value, value }, ...normalizedOptions]
+    : normalizedOptions;
+  const [mode, setMode] = useState<"select" | "custom">(mergedOptions.length > 0 ? "select" : "custom");
+
+  useEffect(() => {
+    if (!mergedOptions.length) {
+      setMode("custom");
+      return;
+    }
+    setMode("select");
+  }, [mergedOptions, value]);
+
+  if (mode === "custom") {
+    return <div className="selectOrInput">
+      <input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />
+      {mergedOptions.length > 0 && <button className="ghost small" type="button" onClick={() => { setMode("select"); if (!value && mergedOptions[0]) onChange(mergedOptions[0].value); }}>Select From List</button>}
+    </div>;
+  }
+
+  return <div className="selectOrInput">
+    <select value={mergedOptions.some((item) => item.value === value) ? value : ""} onChange={(event) => onChange(event.target.value)}>
+      <option value="">Select</option>
+      {mergedOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+    </select>
+    <button className="ghost small" type="button" onClick={() => setMode("custom")}>Custom</button>
+  </div>;
+}
+
+function sftpPathOptions(resource: Resource, paths: string[], currentValue: string) {
+  const basePath = String(resource.config.remote_path ?? "");
+  const options = paths.map((path) => {
+    const normalizedBase = basePath.endsWith("/") ? basePath : `${basePath}/`;
+    const label = path.startsWith(normalizedBase) ? path.slice(normalizedBase.length) : path.split("/").pop() || path;
+    return { label, value: path };
+  });
+  if (currentValue && !options.some((item) => item.value === currentValue)) {
+    options.unshift({ label: currentValue.split("/").pop() || currentValue, value: currentValue });
+  }
+  return options;
 }
 
 function LoginPage({
@@ -1046,6 +1222,7 @@ function StepCard({
   index,
   columns,
   sourceResources,
+  activeSourceResource,
   onChange,
   onDuplicate,
   onDelete,
@@ -1057,6 +1234,7 @@ function StepCard({
   index: number;
   columns: string[];
   sourceResources: Resource[];
+  activeSourceResource?: Resource;
   onChange: (step: TransformationStep) => void;
   onDuplicate: () => void;
   onDelete: () => void;
@@ -1074,7 +1252,7 @@ function StepCard({
         </div>
         <label className="toggle"><input type="checkbox" disabled={readOnly} checked={step.is_enabled} onChange={(event) => onChange({ ...step, is_enabled: event.target.checked })} />Enabled</label>
       </div>
-      <StepForm step={step} columns={columns} sourceResources={sourceResources} onChange={readOnly ? () => undefined : onChange} />
+      <StepForm step={step} columns={columns} sourceResources={sourceResources} activeSourceResource={activeSourceResource} onChange={readOnly ? () => undefined : onChange} />
       <label>Step note<input readOnly={readOnly} value={step.note ?? ""} onChange={(event) => onChange({ ...step, note: event.target.value })} placeholder="Standardize phone format" /></label>
       {!readOnly && <div className="stepActions">
         <button className="ghost small" onClick={onMoveUp} title="Move up">↑</button>
@@ -1086,7 +1264,7 @@ function StepCard({
   );
 }
 
-function StepForm({ step, columns, sourceResources, onChange }: { step: TransformationStep; columns: string[]; sourceResources: Resource[]; onChange: (step: TransformationStep) => void }) {
+function StepForm({ step, columns, sourceResources, activeSourceResource, onChange }: { step: TransformationStep; columns: string[]; sourceResources: Resource[]; activeSourceResource?: Resource; onChange: (step: TransformationStep) => void }) {
   const params = step.parameters;
   const setParams = (parameters: Record<string, unknown>) => onChange({ ...step, parameters });
   if (step.step_type === "select") {
@@ -1115,8 +1293,22 @@ function StepForm({ step, columns, sourceResources, onChange }: { step: Transfor
     ))}<button className="ghost small" onClick={() => setParams({ casts: [...casts, { column: "", type: "string" }] })}>Add cast</button></div>;
   }
   if (step.step_type === "join") {
+    const sameConnection = String(params.right_source_mode ?? "saved_source") === "same_connection";
+    const sameSourceConfig = (params.right_source_config as Record<string, unknown> | undefined) ?? {};
+    const setSameSourceConfig = (next: Record<string, unknown>) => setParams({ ...params, right_source_mode: "same_connection", right_source_config: next });
     return <div className="formulaGrid">
-      <label>Join source<select value={String(params.right_source_id ?? "")} onChange={(event) => setParams({ ...params, right_source_id: event.target.value ? Number(event.target.value) : "" })}><option value="">Select datasource</option>{sourceResources.map((resource) => <option key={resource.id} value={resource.id}>{resource.name}</option>)}</select></label>
+      <label>Join source mode<select value={String(params.right_source_mode ?? "saved_source")} onChange={(event) => setParams({ ...params, right_source_mode: event.target.value, right_source_id: "", right_source_config: {} })}><option value="saved_source">Saved datasource</option><option value="same_connection">Same source connection</option></select></label>
+      {sameConnection ? <>
+        <label>Base connection<input value={activeSourceResource?.name ?? "Select source above"} readOnly /></label>
+        {activeSourceResource?.connector_key === "postgres_source" ? <>
+          <label>Right schema<input value={String(sameSourceConfig.schema ?? activeSourceResource.config.schema ?? "public")} onChange={(event) => setSameSourceConfig({ ...sameSourceConfig, schema: event.target.value })} placeholder="public" /></label>
+          <label>Right table<input value={String(sameSourceConfig.table ?? "")} onChange={(event) => setSameSourceConfig({ ...sameSourceConfig, table: event.target.value, query: sameSourceConfig.query ?? "" })} placeholder="loan_table" /></label>
+          <label className="fullWidth">Right query<textarea className="miniTextarea" value={String(sameSourceConfig.query ?? "")} onChange={(event) => setSameSourceConfig({ ...sameSourceConfig, query: event.target.value })} placeholder="Optional custom SQL for join side" /></label>
+        </> : activeSourceResource?.connector_key === "sftp_source" ? <>
+          <label>Right file path<input value={String(sameSourceConfig.remote_path ?? "")} onChange={(event) => setSameSourceConfig({ ...sameSourceConfig, remote_path: event.target.value })} placeholder="/in/loans.csv" /></label>
+          <label>Format<select value={String(sameSourceConfig.format ?? activeSourceResource.config.format ?? "csv")} onChange={(event) => setSameSourceConfig({ ...sameSourceConfig, format: event.target.value })}><option value="csv">csv</option><option value="xlsx">xlsx</option></select></label>
+        </> : <label>Right dataset config<input value={JSON.stringify(sameSourceConfig)} readOnly /></label>}
+      </> : <label>Join source<select value={String(params.right_source_id ?? "")} onChange={(event) => setParams({ ...params, right_source_mode: "saved_source", right_source_id: event.target.value ? Number(event.target.value) : "" })}><option value="">Select datasource</option>{sourceResources.map((resource) => <option key={resource.id} value={resource.id}>{resource.name}</option>)}</select></label>}
       <label>Join type<select value={String(params.join_type ?? "left")} onChange={(event) => setParams({ ...params, join_type: event.target.value })}>{["left", "inner", "right", "outer"].map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
       <label>Left key<ColumnSelect value={String(params.left_key ?? "")} columns={columns} onChange={(value) => setParams({ ...params, left_key: value })} /></label>
       <label>Right key<input value={String(params.right_key ?? "")} onChange={(event) => setParams({ ...params, right_key: event.target.value })} placeholder="customer_id" /></label>
@@ -1205,6 +1397,24 @@ function StepForm({ step, columns, sourceResources, onChange }: { step: Transfor
       <label>Value column<ColumnSelect value={String(params.value_column ?? "")} columns={columns} onChange={(value) => setParams({ ...params, value_column: value })} /></label>
       <label>Aggregation<select value={String(params.aggfunc ?? "sum")} onChange={(event) => setParams({ ...params, aggfunc: event.target.value })}>{AGG_FUNCS.filter((fn) => fn !== "last").map((fn) => <option key={fn} value={fn}>{fn}</option>)}</select></label>
       <label>Fill value<input value={String(params.fill_value ?? "0")} onChange={(event) => setParams({ ...params, fill_value: event.target.value })} /></label>
+    </div>;
+  }
+  if (step.step_type === "custom") {
+    return <div className="ruleStack">
+      <div className="customTransformHelp">
+        <strong>Input:</strong> previous step output is available as <code>df</code>.
+        <strong>Output:</strong> return a dataframe from <code>transform(df)</code> or assign <code>result = df</code>.
+        <strong>Helpers:</strong> <code>pd</code> is available for pandas work.
+      </div>
+      <label className="editor fullWidth">
+        Python code
+        <textarea
+          className="pythonEditor miniTextarea"
+          value={String(params.code ?? "")}
+          onChange={(event) => setParams({ ...params, code: event.target.value })}
+          placeholder={"def transform(df):\n    next_df = df.copy()\n    next_df['new_column'] = next_df['amount'] * 2\n    return next_df"}
+        />
+      </label>
     </div>;
   }
   return <div className="ruleRow"><ColumnSelect value={String(params.column ?? "")} columns={columns} onChange={(value) => setParams({ ...params, column: value })} /><label>Ascending<select value={String(params.ascending ?? true)} onChange={(event) => setParams({ ...params, ascending: event.target.value === "true" })}><option value="true">Ascending</option><option value="false">Descending</option></select></label></div>;
@@ -1371,7 +1581,7 @@ function ConnectorCatalog({
               <input value={selected.name} readOnly />
             </label>
           </div>
-          <GeneratedConfigForm connector={selected} value={configValue} onChange={onConfigChange} />
+          <GeneratedConfigForm connector={selected} value={configValue} onChange={onConfigChange} connectionOnly />
         </div>
       )}
       <div className="panelHead listHead">
@@ -1401,15 +1611,17 @@ function ConnectorCatalog({
 function GeneratedConfigForm({
   connector,
   value,
-  onChange
+  onChange,
+  connectionOnly = false
 }: {
   connector: Connector;
   value: string;
   onChange: (value: string) => void;
+  connectionOnly?: boolean;
 }) {
   const config = safeParseObject(value);
   const required = new Set(connector.config_schema.required ?? []);
-  const entries = Object.entries(connector.config_schema.properties ?? {});
+  const entries = Object.entries(connector.config_schema.properties ?? {}).filter(([key]) => !connectionOnly || !CONNECTION_TARGET_FIELDS.has(key));
 
   function updateField(key: string, schema: SchemaProperty, rawValue: string) {
     const next = { ...config };
@@ -1467,6 +1679,7 @@ const STEP_TYPES: { type: StepType; label: string; description: string }[] = [
   { type: "value_map", label: "Map Column Values", description: "Map values such as yes to 1 and no to 0" },
   { type: "groupby", label: "Group By", description: "Aggregate rows by one or more columns" },
   { type: "pivot", label: "Pivot", description: "Turn values from rows into output columns" },
+  { type: "custom", label: "Custom Transform", description: "Run custom Python against the current dataframe" },
   { type: "deduplicate", label: "Remove Duplicates", description: "Drop duplicate rows by subset" },
   { type: "sort", label: "Sort Rows", description: "Order output rows" }
 ];
@@ -1487,6 +1700,7 @@ const FILTER_OPERATORS = [
 
 const DATA_TYPES = ["string", "integer", "float", "boolean", "date", "datetime"];
 const AGG_FUNCS = ["sum", "mean", "min", "max", "count", "count_distinct", "first", "last"];
+const CONNECTION_TARGET_FIELDS = new Set(["schema", "table", "query", "path_pattern", "output_path_pattern", "format", "mode", "primary_key"]);
 
 function defaultSteps(): TransformationStep[] {
   return [
@@ -1505,7 +1719,7 @@ function emptyStep(stepType: StepType): TransformationStep {
   const params: Record<string, unknown> = {
     select: { columns: [] },
     rename: { mappings: [] },
-    join: { right_source_id: "", join_type: "left", left_key: "", right_key: "", right_columns: [], suffix: "_right" },
+    join: { right_source_mode: "saved_source", right_source_id: "", right_source_config: {}, join_type: "left", left_key: "", right_key: "", right_columns: [], suffix: "_right" },
     cast: { casts: [] },
     fillna: { fills: [] },
     derive: { output_column: "", output_type: "float", left: { kind: "column", value: "" }, operator: "+", right: { kind: "constant", value: "" } },
@@ -1513,6 +1727,7 @@ function emptyStep(stepType: StepType): TransformationStep {
     value_map: { column: "", output_column: "", output_type: "integer", mappings: [{ from: "yes", to: "1" }, { from: "no", to: "0" }] },
     groupby: { group_columns: [], aggregations: [{ column: "", function: "sum", output_column: "" }] },
     pivot: { index_columns: [], pivot_column: "", value_column: "", aggfunc: "sum", fill_value: 0 },
+    custom: { code: "def transform(df):\n    next_df = df.copy()\n    return next_df" },
     deduplicate: { columns: [], keep: "first" },
     sort: { column: "", ascending: true }
   }[stepType] as Record<string, unknown>;
@@ -1525,13 +1740,15 @@ function emptyStep(stepType: StepType): TransformationStep {
   };
 }
 
-function transformationPayload(draft: { name: string; description: string; source_id: string; destination_id: string; steps: TransformationStep[] }) {
+function transformationPayload(draft: { name: string; description: string; source_id: string; destination_id: string; source_config: Record<string, unknown>; destination_config: Record<string, unknown>; steps: TransformationStep[] }) {
   return {
     name: draft.name,
     description: draft.description,
     source_id: draft.source_id ? Number(draft.source_id) : null,
     destination_id: draft.destination_id ? Number(draft.destination_id) : null,
-    steps: draft.steps
+    source_config: sanitizeConnectorConfig("sftp_source", draft.source_config),
+    destination_config: sanitizeConnectorConfig("sftp_destination", draft.destination_config),
+    steps: sanitizeTransformationSteps(draft.steps)
   };
 }
 
@@ -1558,7 +1775,7 @@ function stableJson(value: unknown): string {
 }
 
 function resourceSignature(config: Record<string, unknown>): string {
-  return ["host", "database", "schema", "table", "query", "remote_path", "format"]
+  return ["host", "port", "database", "username"]
     .map((key) => String(config[key] ?? ""))
     .join("|");
 }
@@ -1602,11 +1819,31 @@ function parseJson(value: string) {
   return parsed;
 }
 
+function sanitizeConnectorConfig(connectorKey: string, config: Record<string, unknown>) {
+  if (!connectorKey.startsWith("sftp_")) return config;
+  const next = { ...config };
+  delete next.path_pattern;
+  delete next.output_path_pattern;
+  return next;
+}
+
+function sanitizeTransformationSteps(steps: TransformationStep[]) {
+  return steps.map((step) => {
+    if (step.step_type !== "join") return step;
+    const params = { ...step.parameters };
+    if (String(params.right_source_mode ?? "") === "same_connection" && params.right_source_config && typeof params.right_source_config === "object") {
+      params.right_source_config = sanitizeConnectorConfig("sftp_source", params.right_source_config as Record<string, unknown>);
+    }
+    return { ...step, parameters: params };
+  });
+}
+
 function sampleConfig(connector: Connector) {
   const properties = connector.config_schema.properties;
   if (!properties || typeof properties !== "object") return "{}";
   const sample: Record<string, unknown> = {};
   Object.entries(properties).forEach(([key, schema]) => {
+    if (CONNECTION_TARGET_FIELDS.has(key)) return;
     if (schema.default !== undefined) sample[key] = schema.default;
     else if (schema.type === "number") sample[key] = key === "port" ? 5432 : 0;
     else if (schema.type === "object") sample[key] = {};
@@ -1628,17 +1865,14 @@ function sampleConfigForKey(key: string) {
       port: 22,
       username: "",
       password: "",
-      remote_path: "/data/file.csv",
-      operation: key.includes("destination") ? "write" : "read",
-      format: "csv"
+      remote_path: "",
+      operation: key.includes("destination") ? "write" : "read"
     }, null, 2);
   }
   return JSON.stringify({
     host: "",
     port: 5432,
     database: "",
-    schema: "public",
-    table: "customers",
     username: "",
     password: ""
   }, null, 2);
@@ -1669,8 +1903,17 @@ function placeholderFor(key: string, schema: SchemaProperty) {
   if (key === "host") return "10.10.0.20";
   if (key === "database") return "analytics";
   if (key === "query") return "select * from table";
+  if (key === "remote_path") return "/home/sftp/base-folder";
   if (key.includes("path")) return "/path/to/file.csv";
   return humanize(key);
+}
+
+function canLoadColumns(connectorKey: string, config: Record<string, unknown>) {
+  if (connectorKey === "postgres_source") return Boolean(config.query || config.table);
+  if (connectorKey === "sftp_source") return Boolean(config.remote_path);
+  if (connectorKey === "postgres_destination") return Boolean(config.table);
+  if (connectorKey === "sftp_destination") return Boolean(config.remote_path || config.output_path_pattern);
+  return true;
 }
 
 function loadSession(): AuthSession | null {

@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 
@@ -308,7 +309,7 @@ class TransformationExecutor:
             "tuple": tuple,
             "zip": zip,
         }
-        globals_scope = {"__builtins__": safe_builtins, "pd": pd}
+        globals_scope = {"__builtins__": safe_builtins, "pd": pd, "np": np}
         locals_scope: dict[str, Any] = {"df": df.copy()}
         exec(code, globals_scope, locals_scope)
         result = locals_scope.get("result")
@@ -377,6 +378,9 @@ def validate_transforms(columns: list[str], steps: list[dict[str, Any]], destina
         elif step_type == "pivot" and params.get("index_columns"):
             current = list(params["index_columns"])
         elif step_type == "custom":
+            declared_output_columns = [col for col in params.get("output_columns", []) if col]
+            if declared_output_columns:
+                current = declared_output_columns
             warnings.append(f"Step {index} {step['step_name']} uses custom Python; downstream column validation may be incomplete")
         warnings.extend(validate_step_order(step, steps[: index - 1]))
     if destination_columns:

@@ -1404,12 +1404,13 @@ function StepForm({ step, columns, sourceResources, activeSourceResource, onChan
       <div className="customTransformHelp">
         <strong>Input:</strong> previous step output is available as <code>df</code>.
         <strong>Output:</strong> return a dataframe from <code>transform(df)</code> or assign <code>result = df</code>.
-        <strong>Helpers:</strong> <code>pd</code> is available for pandas work.
+        <strong>Helpers:</strong> <code>pd</code> and <code>np</code> are available.
       </div>
+      <label>Declared output columns<input value={asCsv(params.output_columns)} onChange={(event) => setParams({ ...params, output_columns: csvList(event.target.value) })} placeholder="customer_id, net_amount, risk_band" /></label>
       <label className="editor fullWidth">
         Python code
-        <textarea
-          className="pythonEditor miniTextarea"
+        <CodeEditor
+          className="pythonEditor"
           value={String(params.code ?? "")}
           onChange={(event) => setParams({ ...params, code: event.target.value })}
           placeholder={"def transform(df):\n    next_df = df.copy()\n    next_df['new_column'] = next_df['amount'] * 2\n    return next_df"}
@@ -1481,6 +1482,13 @@ function Metric({ label, value }: { label: string; value: string | number }) {
 
 function Editor({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return <label className="editor">{label}<textarea value={value} onChange={(event) => onChange(event.target.value)} /></label>;
+}
+
+function CodeEditor({ className, value, onChange, placeholder }: { className?: string; value: string; onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void; placeholder?: string }) {
+  return <div className={`codeEditorShell ${className ?? ""}`}>
+    <pre className="codeEditorHighlight" aria-hidden="true" dangerouslySetInnerHTML={{ __html: highlightPython(value || placeholder || "") }} />
+    <textarea className="codeEditorInput miniTextarea" value={value} onChange={onChange} placeholder={placeholder} spellCheck={false} />
+  </div>;
 }
 
 function Status({ status }: { status: Run["status"] }) {
@@ -1727,7 +1735,7 @@ function emptyStep(stepType: StepType): TransformationStep {
     value_map: { column: "", output_column: "", output_type: "integer", mappings: [{ from: "yes", to: "1" }, { from: "no", to: "0" }] },
     groupby: { group_columns: [], aggregations: [{ column: "", function: "sum", output_column: "" }] },
     pivot: { index_columns: [], pivot_column: "", value_column: "", aggfunc: "sum", fill_value: 0 },
-    custom: { code: "def transform(df):\n    next_df = df.copy()\n    return next_df" },
+    custom: { output_columns: [], code: "def transform(df):\n    next_df = df.copy()\n    return next_df" },
     deduplicate: { columns: [], keep: "first" },
     sort: { column: "", ascending: true }
   }[stepType] as Record<string, unknown>;
@@ -1817,6 +1825,28 @@ function labelFor(connectors: Connector[], key: string) {
 function parseJson(value: string) {
   const parsed = JSON.parse(value);
   return parsed;
+}
+
+function highlightPython(code: string) {
+  const placeholders: string[] = [];
+  let escaped = escapeHtml(code);
+  escaped = escaped.replace(/(\".*?\"|\'.*?\'|#.*$)/gm, (match) => {
+    const tokenClass = match.startsWith("#") ? "comment" : "string";
+    const key = `__TOKEN_${placeholders.length}__`;
+    placeholders.push(`<span class="token ${tokenClass}">${match}</span>`);
+    return key;
+  });
+  escaped = escaped
+    .replace(/\b(def|return|if|elif|else|for|while|in|import|from|as|try|except|raise|with|lambda|and|or|not|True|False|None|class)\b/g, '<span class="token keyword">$1</span>')
+    .replace(/\b(pd|np|df|result|transform)\b/g, '<span class="token builtin">$1</span>');
+  return escaped.replace(/__TOKEN_(\d+)__/g, (_, index) => placeholders[Number(index)] ?? "");
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 function sanitizeConnectorConfig(connectorKey: string, config: Record<string, unknown>) {

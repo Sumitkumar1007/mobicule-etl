@@ -322,6 +322,85 @@ h2 {
   min-height: 190px;
 }
 
+.codeEditorShell {
+  position: relative;
+  min-height: 220px;
+  border: 1px solid #ccd8d1;
+  border-radius: 10px;
+  background: #0f1720;
+  overflow: hidden;
+}
+
+.codeEditorHighlight,
+.codeEditorInput {
+  min-height: 220px;
+  margin: 0;
+  padding: 14px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.codeEditorHighlight {
+  color: #dbe7f3;
+  pointer-events: none;
+}
+
+.codeEditorInput {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: transparent;
+  caret-color: #f8fafc;
+  resize: vertical;
+}
+
+.codeEditorInput::placeholder {
+  color: rgba(219, 231, 243, 0.55);
+}
+
+.codeEditorInput:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 1px #1e6bff;
+}
+
+.token.keyword {
+  color: #ff8a65;
+  font-weight: 700;
+}
+
+.token.string {
+  color: #a5d6a7;
+}
+
+.token.comment {
+  color: #90a4ae;
+}
+
+.token.builtin {
+  color: #64b5f6;
+}
+
+.customTransformHelp {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #dce4df;
+  border-radius: 8px;
+  background: #fbfdfb;
+  padding: 12px;
+  color: #596960;
+  font-size: 13px;
+}
+
+.customTransformHelp code {
+  color: #1e6bff;
+  font-weight: 800;
+}
+
 .columnPicker {
   display: grid;
   gap: 12px;

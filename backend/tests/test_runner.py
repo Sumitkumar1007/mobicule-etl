@@ -30,13 +30,13 @@ def test_same_connection_sftp_join_config():
             "port": 22,
             "username": "etl",
             "password": "secret",
-            "remote_path": "/in/customers.csv",
+            "remote_path": "/in",
             "format": "csv",
         },
-        {"path_pattern": "/in/loans_*.csv", "format": "xlsx"},
+        {"remote_path": "loans.csv", "format": "xlsx"},
     )
 
     assert result["host"] == "sftp.local"
-    assert result["path_pattern"] == "/in/loans_*.csv"
+    assert result["remote_path"] == "/in/loans.csv"
     assert result["format"] == "xlsx"
     assert result["operation"] == "read"

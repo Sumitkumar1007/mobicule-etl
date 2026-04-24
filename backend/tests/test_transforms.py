@@ -276,3 +276,50 @@ def test_custom_transform_supports_result_variable():
     )
 
     assert result == [{"amount": 10, "net": 9}]
+
+
+def test_custom_transform_supports_numpy_helper():
+    rows = [{"amount": 10}, {"amount": 20}]
+    result = apply_transforms(
+        rows,
+        [
+            {
+                "id": "custom",
+                "step_type": "custom",
+                "step_name": "Custom Transform",
+                "parameters": {
+                    "code": "\n".join([
+                        "def transform(df):",
+                        "    next_df = df.copy()",
+                        "    next_df['bucket'] = np.where(next_df['amount'] >= 20, 'high', 'low')",
+                        "    return next_df",
+                    ])
+                },
+            }
+        ],
+    )
+
+    assert result == [{"amount": 10, "bucket": "low"}, {"amount": 20, "bucket": "high"}]
+
+
+def test_custom_transform_declared_output_columns_help_validation():
+    result = validate_transforms(
+        ["customer_id", "amount"],
+        [
+            {
+                "id": "custom",
+                "step_type": "custom",
+                "step_name": "Custom Transform",
+                "parameters": {"output_columns": ["customer_id", "net_amount"], "code": "result = df"},
+            },
+            {
+                "id": "select",
+                "step_type": "select",
+                "step_name": "Select Columns",
+                "parameters": {"columns": ["customer_id", "net_amount"]},
+            }
+        ],
+        destination_columns=["customer_id", "net_amount"],
+    )
+
+    assert result["errors"] == []

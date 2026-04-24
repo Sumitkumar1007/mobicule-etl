@@ -84,3 +84,79 @@ def test_derived_column_output_type():
     )
 
     assert result == [{"amount": "10.25", "discount": "2.25", "net_amount": 8}]
+
+
+def test_join_groupby_pivot_and_value_map():
+    rows = [
+        {"customer_id": "1", "month": "Jan", "amount": "10", "active": "yes"},
+        {"customer_id": "1", "month": "Feb", "amount": "20", "active": "no"},
+        {"customer_id": "2", "month": "Jan", "amount": "5", "active": "yes"},
+    ]
+    result = apply_transforms(
+        rows,
+        [
+            {
+                "id": "join",
+                "step_type": "join",
+                "step_name": "Join / Merge",
+                "parameters": {
+                    "left_key": "customer_id",
+                    "right_key": "customer_id",
+                    "right_columns": ["segment"],
+                    "right_rows": [{"customer_id": "1", "segment": "A"}, {"customer_id": "2", "segment": "B"}],
+                },
+            },
+            {
+                "id": "map",
+                "step_type": "value_map",
+                "step_name": "Map Column Values",
+                "parameters": {
+                    "column": "active",
+                    "output_column": "active_flag",
+                    "output_type": "integer",
+                    "mappings": [{"from": "yes", "to": "1"}, {"from": "no", "to": "0"}],
+                },
+            },
+            {"id": "cast", "step_type": "cast", "step_name": "Change Data Type", "parameters": {"casts": [{"column": "amount", "type": "float"}]}},
+            {
+                "id": "group",
+                "step_type": "groupby",
+                "step_name": "Group By",
+                "parameters": {"group_columns": ["segment", "month"], "aggregations": [{"column": "amount", "function": "sum", "output_column": "total"}]},
+            },
+            {
+                "id": "pivot",
+                "step_type": "pivot",
+                "step_name": "Pivot",
+                "parameters": {"index_columns": ["segment"], "pivot_column": "month", "value_column": "total", "aggfunc": "sum"},
+            },
+        ],
+    )
+
+    assert result == [{"segment": "A", "Feb": 20.0, "Jan": 10.0}, {"segment": "B", "Feb": 0.0, "Jan": 5.0}]
+
+
+def test_pivot_count_can_use_index_as_value_column():
+    rows = [
+        {"apac_card_number": "1", "vertical": "cards"},
+        {"apac_card_number": "1", "vertical": "loans"},
+        {"apac_card_number": "2", "vertical": "cards"},
+    ]
+    result = apply_transforms(
+        rows,
+        [
+            {
+                "id": "pivot",
+                "step_type": "pivot",
+                "step_name": "Pivot",
+                "parameters": {
+                    "index_columns": ["apac_card_number"],
+                    "pivot_column": "vertical",
+                    "value_column": "apac_card_number",
+                    "aggfunc": "count",
+                },
+            }
+        ],
+    )
+
+    assert result == [{"apac_card_number": "1", "cards": 1, "loans": 1}, {"apac_card_number": "2", "cards": 1, "loans": 0}]

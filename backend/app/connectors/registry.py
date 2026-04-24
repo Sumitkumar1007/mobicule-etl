@@ -22,6 +22,8 @@ SFTP_FIELDS = {
     "password": {"type": "string", "secret": True},
     "private_key": {"type": "string", "secret": True},
     "remote_path": {"type": "string"},
+    "path_pattern": {"type": "string"},
+    "output_path_pattern": {"type": "string"},
     "operation": {"type": "string", "enum": ["read", "write"], "default": "read"},
     "format": {"type": "string", "enum": ["csv", "xlsx"], "default": "csv"},
 }

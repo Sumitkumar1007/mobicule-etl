@@ -83,7 +83,7 @@ type User = {
 };
 type AuthSession = { token: string; user: User };
 
-type StepType = "select" | "rename" | "cast" | "fillna" | "derive" | "filter" | "deduplicate" | "sort";
+type StepType = "select" | "rename" | "cast" | "fillna" | "derive" | "filter" | "deduplicate" | "sort" | "join" | "groupby" | "pivot" | "value_map";
 type Operand = { kind: "column" | "constant"; value: string };
 type TransformationStep = {
   id: string;
@@ -697,6 +697,7 @@ function App() {
                       step={step}
                       index={index}
                       columns={sourceColumns}
+                      sourceResources={sourceResources}
                       onChange={(next) => updateStep(step.id, () => next)}
                       onDuplicate={() => setTransformationDraft({ ...transformationDraft, steps: [...transformationDraft.steps, { ...step, id: makeId(), step_name: `${step.step_name} copy` }] })}
                       onDelete={() => setTransformationDraft({ ...transformationDraft, steps: transformationDraft.steps.filter((item) => item.id !== step.id) })}
@@ -1044,6 +1045,7 @@ function StepCard({
   step,
   index,
   columns,
+  sourceResources,
   onChange,
   onDuplicate,
   onDelete,
@@ -1054,6 +1056,7 @@ function StepCard({
   step: TransformationStep;
   index: number;
   columns: string[];
+  sourceResources: Resource[];
   onChange: (step: TransformationStep) => void;
   onDuplicate: () => void;
   onDelete: () => void;
@@ -1071,7 +1074,7 @@ function StepCard({
         </div>
         <label className="toggle"><input type="checkbox" disabled={readOnly} checked={step.is_enabled} onChange={(event) => onChange({ ...step, is_enabled: event.target.checked })} />Enabled</label>
       </div>
-      <StepForm step={step} columns={columns} onChange={readOnly ? () => undefined : onChange} />
+      <StepForm step={step} columns={columns} sourceResources={sourceResources} onChange={readOnly ? () => undefined : onChange} />
       <label>Step note<input readOnly={readOnly} value={step.note ?? ""} onChange={(event) => onChange({ ...step, note: event.target.value })} placeholder="Standardize phone format" /></label>
       {!readOnly && <div className="stepActions">
         <button className="ghost small" onClick={onMoveUp} title="Move up">↑</button>
@@ -1083,7 +1086,7 @@ function StepCard({
   );
 }
 
-function StepForm({ step, columns, onChange }: { step: TransformationStep; columns: string[]; onChange: (step: TransformationStep) => void }) {
+function StepForm({ step, columns, sourceResources, onChange }: { step: TransformationStep; columns: string[]; sourceResources: Resource[]; onChange: (step: TransformationStep) => void }) {
   const params = step.parameters;
   const setParams = (parameters: Record<string, unknown>) => onChange({ ...step, parameters });
   if (step.step_type === "select") {
@@ -1110,6 +1113,16 @@ function StepForm({ step, columns, onChange }: { step: TransformationStep; colum
         <button className="ghost small" onClick={() => setParams({ casts: casts.filter((_, itemIndex) => itemIndex !== idx) })}>Delete</button>
       </div>
     ))}<button className="ghost small" onClick={() => setParams({ casts: [...casts, { column: "", type: "string" }] })}>Add cast</button></div>;
+  }
+  if (step.step_type === "join") {
+    return <div className="formulaGrid">
+      <label>Join source<select value={String(params.right_source_id ?? "")} onChange={(event) => setParams({ ...params, right_source_id: event.target.value ? Number(event.target.value) : "" })}><option value="">Select datasource</option>{sourceResources.map((resource) => <option key={resource.id} value={resource.id}>{resource.name}</option>)}</select></label>
+      <label>Join type<select value={String(params.join_type ?? "left")} onChange={(event) => setParams({ ...params, join_type: event.target.value })}>{["left", "inner", "right", "outer"].map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
+      <label>Left key<ColumnSelect value={String(params.left_key ?? "")} columns={columns} onChange={(value) => setParams({ ...params, left_key: value })} /></label>
+      <label>Right key<input value={String(params.right_key ?? "")} onChange={(event) => setParams({ ...params, right_key: event.target.value })} placeholder="customer_id" /></label>
+      <label>Right columns<input value={asCsv(params.right_columns)} onChange={(event) => setParams({ ...params, right_columns: csvList(event.target.value) })} placeholder="name,status" /></label>
+      <label>Right suffix<input value={String(params.suffix ?? "_right")} onChange={(event) => setParams({ ...params, suffix: event.target.value })} /></label>
+    </div>;
   }
   if (step.step_type === "fillna") {
     const fills = params.fills as { column: string; strategy: string; value?: string }[] ?? [];
@@ -1153,6 +1166,45 @@ function StepForm({ step, columns, onChange }: { step: TransformationStep; colum
     return <div className="ruleStack">
       <div className="columnChips">{columns.map((column) => <button className={selected.includes(column) ? "selectedChip" : ""} key={column} onClick={() => setParams({ ...params, columns: selected.includes(column) ? selected.filter((item) => item !== column) : [...selected, column] })}>{column}</button>)}</div>
       <label>Keep<select value={String(params.keep ?? "first")} onChange={(event) => setParams({ ...params, keep: event.target.value })}><option value="first">First</option><option value="last">Last</option></select></label>
+    </div>;
+  }
+  if (step.step_type === "value_map") {
+    const mappings = params.mappings as { from: string; to: string }[] ?? [];
+    return <div className="ruleStack">
+      <div className="ruleRow">
+        <ColumnSelect value={String(params.column ?? "")} columns={columns} onChange={(value) => setParams({ ...params, column: value })} />
+        <label>Output column<input value={String(params.output_column ?? "")} onChange={(event) => setParams({ ...params, output_column: event.target.value })} placeholder="leave blank to overwrite" /></label>
+        <label>Output datatype<select value={String(params.output_type ?? "string")} onChange={(event) => setParams({ ...params, output_type: event.target.value })}>{DATA_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
+      </div>
+      {mappings.map((item, idx) => <div className="mappingRow" key={idx}>
+        <input value={item.from} onChange={(event) => setParams({ ...params, mappings: updateArray(mappings, idx, { ...item, from: event.target.value }) })} placeholder="yes" />
+        <input value={item.to} onChange={(event) => setParams({ ...params, mappings: updateArray(mappings, idx, { ...item, to: event.target.value }) })} placeholder="1" />
+        <button className="ghost small" onClick={() => setParams({ ...params, mappings: mappings.filter((_, itemIndex) => itemIndex !== idx) })}>Delete</button>
+      </div>)}
+      <button className="ghost small" onClick={() => setParams({ ...params, mappings: [...mappings, { from: "", to: "" }] })}>Add mapping</button>
+    </div>;
+  }
+  if (step.step_type === "groupby") {
+    const selected = params.group_columns as string[] ?? [];
+    const aggregations = params.aggregations as { column: string; function: string; output_column: string }[] ?? [];
+    return <div className="ruleStack">
+      <div className="columnChips">{columns.map((column) => <button className={selected.includes(column) ? "selectedChip" : ""} key={column} onClick={() => setParams({ ...params, group_columns: selected.includes(column) ? selected.filter((item) => item !== column) : [...selected, column] })}>{column}</button>)}</div>
+      {aggregations.map((item, idx) => <div className="ruleRow" key={idx}>
+        <ColumnSelect value={item.column} columns={columns} onChange={(value) => setParams({ ...params, aggregations: updateArray(aggregations, idx, { ...item, column: value }) })} />
+        <select value={item.function} onChange={(event) => setParams({ ...params, aggregations: updateArray(aggregations, idx, { ...item, function: event.target.value }) })}>{AGG_FUNCS.map((fn) => <option key={fn} value={fn}>{fn}</option>)}</select>
+        <input value={item.output_column ?? ""} onChange={(event) => setParams({ ...params, aggregations: updateArray(aggregations, idx, { ...item, output_column: event.target.value }) })} placeholder="output column" />
+        <button className="ghost small" onClick={() => setParams({ ...params, aggregations: aggregations.filter((_, itemIndex) => itemIndex !== idx) })}>Delete</button>
+      </div>)}
+      <button className="ghost small" onClick={() => setParams({ ...params, aggregations: [...aggregations, { column: "", function: "sum", output_column: "" }] })}>Add aggregation</button>
+    </div>;
+  }
+  if (step.step_type === "pivot") {
+    return <div className="formulaGrid">
+      <label>Index columns<input value={asCsv(params.index_columns)} onChange={(event) => setParams({ ...params, index_columns: csvList(event.target.value) })} placeholder="customer_id,month" /></label>
+      <label>Pivot column<ColumnSelect value={String(params.pivot_column ?? "")} columns={columns} onChange={(value) => setParams({ ...params, pivot_column: value })} /></label>
+      <label>Value column<ColumnSelect value={String(params.value_column ?? "")} columns={columns} onChange={(value) => setParams({ ...params, value_column: value })} /></label>
+      <label>Aggregation<select value={String(params.aggfunc ?? "sum")} onChange={(event) => setParams({ ...params, aggfunc: event.target.value })}>{AGG_FUNCS.filter((fn) => fn !== "last").map((fn) => <option key={fn} value={fn}>{fn}</option>)}</select></label>
+      <label>Fill value<input value={String(params.fill_value ?? "0")} onChange={(event) => setParams({ ...params, fill_value: event.target.value })} /></label>
     </div>;
   }
   return <div className="ruleRow"><ColumnSelect value={String(params.column ?? "")} columns={columns} onChange={(value) => setParams({ ...params, column: value })} /><label>Ascending<select value={String(params.ascending ?? true)} onChange={(event) => setParams({ ...params, ascending: event.target.value === "true" })}><option value="true">Ascending</option><option value="false">Descending</option></select></label></div>;
@@ -1407,10 +1459,14 @@ function GeneratedConfigForm({
 const STEP_TYPES: { type: StepType; label: string; description: string }[] = [
   { type: "select", label: "Select Columns", description: "Keep required columns only" },
   { type: "rename", label: "Rename Columns", description: "Map source names to destination names" },
+  { type: "join", label: "Join / Merge", description: "Merge another datasource by matching keys" },
   { type: "cast", label: "Change Data Type", description: "Convert string, integer, float, date, datetime" },
   { type: "fillna", label: "Fill Null Values", description: "Fixed values, empty string, zero, forward/back fill" },
   { type: "derive", label: "Add Derived Column", description: "Create column with controlled formula builder" },
   { type: "filter", label: "Filter Rows", description: "Build AND/OR conditions visually" },
+  { type: "value_map", label: "Map Column Values", description: "Map values such as yes to 1 and no to 0" },
+  { type: "groupby", label: "Group By", description: "Aggregate rows by one or more columns" },
+  { type: "pivot", label: "Pivot", description: "Turn values from rows into output columns" },
   { type: "deduplicate", label: "Remove Duplicates", description: "Drop duplicate rows by subset" },
   { type: "sort", label: "Sort Rows", description: "Order output rows" }
 ];
@@ -1430,6 +1486,7 @@ const FILTER_OPERATORS = [
 ];
 
 const DATA_TYPES = ["string", "integer", "float", "boolean", "date", "datetime"];
+const AGG_FUNCS = ["sum", "mean", "min", "max", "count", "first", "last"];
 
 function defaultSteps(): TransformationStep[] {
   return [
@@ -1448,10 +1505,14 @@ function emptyStep(stepType: StepType): TransformationStep {
   const params: Record<string, unknown> = {
     select: { columns: [] },
     rename: { mappings: [] },
+    join: { right_source_id: "", join_type: "left", left_key: "", right_key: "", right_columns: [], suffix: "_right" },
     cast: { casts: [] },
     fillna: { fills: [] },
     derive: { output_column: "", output_type: "float", left: { kind: "column", value: "" }, operator: "+", right: { kind: "constant", value: "" } },
     filter: { joiner: "and", conditions: [] },
+    value_map: { column: "", output_column: "", output_type: "integer", mappings: [{ from: "yes", to: "1" }, { from: "no", to: "0" }] },
+    groupby: { group_columns: [], aggregations: [{ column: "", function: "sum", output_column: "" }] },
+    pivot: { index_columns: [], pivot_column: "", value_column: "", aggfunc: "sum", fill_value: 0 },
     deduplicate: { columns: [], keep: "first" },
     sort: { column: "", ascending: true }
   }[stepType] as Record<string, unknown>;
@@ -1514,6 +1575,14 @@ function flattenKeys(value: unknown, keys: Record<string, true> = {}) {
 
 function updateArray<T>(rows: T[], index: number, value: T) {
   return rows.map((row, rowIndex) => rowIndex === index ? value : row);
+}
+
+function csvList(value: string) {
+  return value.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function asCsv(value: unknown) {
+  return Array.isArray(value) ? value.join(", ") : "";
 }
 
 function inferType(column: string) {

@@ -1,7 +1,11 @@
 import csv
+import copy
+import fnmatch
 import json
 import logging
+import posixpath
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +32,7 @@ def enqueue_run(pipeline_id: int) -> int:
 
 def preview(source_key: str, source_config: dict[str, Any], transforms: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows = extract(source_key, source_config)
-    return preview_transforms(rows[:25], transforms).rows[:25]
+    return preview_transforms(rows[:25], prepare_runtime_transforms(transforms)).rows[:25]
 
 
 def run_pipeline(run_id: int) -> None:
@@ -39,7 +43,7 @@ def run_pipeline(run_id: int) -> None:
         rows = extract(pipeline["source_key"], pipeline["source_config"])
         _update_counts(run_id, rows_read=len(rows))
         _log(run_id, "INFO", f"Extracted {len(rows)} rows")
-        result = preview_transforms(rows, pipeline["transforms"])
+        result = preview_transforms(rows, prepare_runtime_transforms(pipeline["transforms"]))
         rows = result.rows
         for step_log in result.logs:
             _log(run_id, step_log.level, step_log.message)
@@ -128,13 +132,20 @@ def _extract_sftp(config: dict[str, Any]) -> list[dict[str, Any]]:
     try:
         transport.connect(username=config["username"], password=password, pkey=pkey)
         client = paramiko.SFTPClient.from_transport(transport)
-        with client.open(config["remote_path"], "r") as handle:
-            content = handle.read()
-        if config.get("format") == "xlsx" or config["remote_path"].endswith(".xlsx"):
-            return _rows_from_xlsx(content if isinstance(content, bytes) else content.encode("utf-8"))
-        if isinstance(content, bytes):
-            content = content.decode("utf-8")
-        return [dict(row) for row in csv.DictReader(content.splitlines())]
+        rows: list[dict[str, Any]] = []
+        for remote_path in _sftp_read_paths(client, config):
+            with client.open(remote_path, "r") as handle:
+                content = handle.read()
+            if config.get("format") == "xlsx" or remote_path.endswith(".xlsx"):
+                file_rows = _rows_from_xlsx(content if isinstance(content, bytes) else content.encode("utf-8"))
+            else:
+                if isinstance(content, bytes):
+                    content = content.decode("utf-8")
+                file_rows = [dict(row) for row in csv.DictReader(content.splitlines())]
+            for row in file_rows:
+                row.setdefault("_source_file", remote_path)
+            rows.extend(file_rows)
+        return rows
     finally:
         transport.close()
 
@@ -203,7 +214,8 @@ def _load_sftp(config: dict[str, Any], rows: list[dict[str, Any]]) -> int:
         import paramiko
     except ImportError as exc:
         raise RuntimeError("paramiko is required for SFTP destination. Install backend requirements.") from exc
-    if config.get("format") == "xlsx" or config["remote_path"].endswith(".xlsx"):
+    remote_path = _format_path_pattern(config.get("output_path_pattern") or config["remote_path"])
+    if config.get("format") == "xlsx" or remote_path.endswith(".xlsx"):
         payload: str | bytes = _xlsx_from_rows(rows)
     else:
         output = io.StringIO()
@@ -219,11 +231,56 @@ def _load_sftp(config: dict[str, Any], rows: list[dict[str, Any]]) -> int:
     try:
         transport.connect(username=config["username"], password=password, pkey=pkey)
         client = paramiko.SFTPClient.from_transport(transport)
-        with client.open(config["remote_path"], "w") as handle:
+        with client.open(remote_path, "w") as handle:
             handle.write(payload)
     finally:
         transport.close()
     return len(rows)
+
+
+def prepare_runtime_transforms(transforms: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    prepared = copy.deepcopy(transforms)
+    for step in prepared:
+        step_type = step.get("step_type") or step.get("type")
+        params = step.setdefault("parameters", {})
+        if step_type == "join" and params.get("right_source_id") and not params.get("right_rows"):
+            resource = _resource_for_join(int(params["right_source_id"]))
+            params["right_rows"] = extract(resource["connector_key"], resource["config"])
+    return prepared
+
+
+def _resource_for_join(resource_id: int) -> dict[str, Any]:
+    with db() as conn:
+        row = conn.execute("SELECT connector_key, config FROM resources WHERE id=? AND type='source'", (resource_id,)).fetchone()
+    if row is None:
+        raise ValueError(f"Join source not found: {resource_id}")
+    data = dict(row)
+    data["config"] = decode(data["config"])
+    return data
+
+
+def _sftp_read_paths(client, config: dict[str, Any]) -> list[str]:
+    pattern = config.get("path_pattern") or config.get("remote_path")
+    if not any(char in pattern for char in "*?[]"):
+        return [pattern]
+    directory = posixpath.dirname(pattern) or "."
+    filename_pattern = posixpath.basename(pattern)
+    return [posixpath.join(directory, item) for item in client.listdir(directory) if fnmatch.fnmatch(item, filename_pattern)]
+
+
+def _format_path_pattern(pattern: str) -> str:
+    now = datetime.now(UTC)
+    values = {
+        "YYYY": now.strftime("%Y"),
+        "YY": now.strftime("%y"),
+        "MM": now.strftime("%m"),
+        "DD": now.strftime("%d"),
+        "hh": now.strftime("%H"),
+        "mm": now.strftime("%M"),
+        "ss": now.strftime("%S"),
+        "timestamp": now.strftime("%Y%m%d%H%M%S"),
+    }
+    return pattern.format(**values)
 
 
 def _rows_from_xlsx(content: bytes) -> list[dict[str, Any]]:

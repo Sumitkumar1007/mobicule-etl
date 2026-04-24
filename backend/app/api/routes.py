@@ -32,7 +32,7 @@ from app.models.schemas import (
 from app.core.security import hash_password, hash_token, verify_password
 from app.services.auth import bearer_token, current_user, login, logout, require_role
 from app.services.metadata import source_columns
-from app.services.runner import enqueue_run, extract, preview
+from app.services.runner import enqueue_run, extract, prepare_runtime_transforms, preview
 from app.services.transforms import preview_transforms, validate_transforms
 
 router = APIRouter()
@@ -352,7 +352,10 @@ def preview_transformation(transformation_id: int, payload: TransformationPrevie
                 break
         steps = selected_steps
     rows = extract(source.connector_key, source.config)[: payload.sample_size]
-    result = preview_transforms(rows, steps)
+    try:
+        result = preview_transforms(rows, prepare_runtime_transforms(steps))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     input_columns = list(rows[0].keys()) if rows else []
     output_columns = list(result.rows[0].keys()) if result.rows else []
     return TransformationPreviewResponse(

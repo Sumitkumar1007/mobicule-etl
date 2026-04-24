@@ -8,12 +8,16 @@ import pandas as pd
 STEP_ORDER = {
     "select": 1,
     "rename": 2,
+    "join": 3,
     "cast": 4,
     "fillna": 5,
     "derive": 6,
     "filter": 7,
-    "deduplicate": 8,
-    "sort": 9,
+    "value_map": 8,
+    "groupby": 9,
+    "pivot": 10,
+    "deduplicate": 11,
+    "sort": 12,
 }
 
 
@@ -84,6 +88,8 @@ class TransformationExecutor:
             return self.apply_select(df, params)
         if step_type == "rename":
             return self.apply_rename(df, params)
+        if step_type == "join":
+            return self.apply_join(df, params)
         if step_type == "cast":
             return self.apply_cast(df, params)
         if step_type == "fillna":
@@ -92,6 +98,12 @@ class TransformationExecutor:
             return self.apply_derive(df, params)
         if step_type == "filter":
             return self.apply_filter(df, params)
+        if step_type == "value_map":
+            return self.apply_value_map(df, params)
+        if step_type == "groupby":
+            return self.apply_groupby(df, params)
+        if step_type == "pivot":
+            return self.apply_pivot(df, params)
         if step_type == "deduplicate":
             return self.apply_deduplicate(df, params)
         if step_type == "sort":
@@ -101,7 +113,7 @@ class TransformationExecutor:
     def apply_select(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
         columns = [col for col in params.get("columns", []) if col in df.columns]
         if not columns:
-            raise ValueError("Select Columns requires at least one existing column")
+            return df
         return df.loc[:, columns].copy()
 
     def apply_rename(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
@@ -110,6 +122,27 @@ class TransformationExecutor:
         if duplicates:
             raise ValueError(f"Duplicate destination columns: {', '.join(sorted(set(duplicates)))}")
         return df.rename(columns=mapping)
+
+    def apply_join(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
+        right_rows = params.get("right_rows") or []
+        if not isinstance(right_rows, list):
+            raise ValueError("Join needs right rows")
+        right = pd.DataFrame(right_rows)
+        if right.empty:
+            raise ValueError("Join source returned no rows")
+        left_key = params.get("left_key")
+        right_key = params.get("right_key")
+        if left_key not in df.columns:
+            raise ValueError(f"Unknown left join column {left_key}")
+        if right_key not in right.columns:
+            raise ValueError(f"Unknown right join column {right_key}")
+        how = params.get("join_type", "left")
+        if how not in {"left", "inner", "right", "outer"}:
+            raise ValueError(f"Unsupported join type {how}")
+        keep_columns = [col for col in params.get("right_columns", []) if col in right.columns and col != right_key]
+        right_frame = right[[right_key, *keep_columns]].copy() if keep_columns else right.copy()
+        suffix = params.get("suffix") or "_right"
+        return df.merge(right_frame, how=how, left_on=left_key, right_on=right_key, suffixes=("", suffix))
 
     def apply_cast(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
         result = df.copy()
@@ -146,7 +179,7 @@ class TransformationExecutor:
         result = df.copy()
         output_column = params.get("output_column")
         if not output_column:
-            raise ValueError("Derived column needs output column")
+            return result
         left = _operand_value(result, params.get("left", {}))
         right = _operand_value(result, params.get("right", {}))
         operator = params.get("operator")
@@ -175,6 +208,72 @@ class TransformationExecutor:
         for next_mask in masks[1:]:
             mask = mask | next_mask if joiner == "or" else mask & next_mask
         return df.loc[mask].copy()
+
+    def apply_value_map(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
+        result = df.copy()
+        column = params.get("column")
+        output_column = params.get("output_column") or column
+        if column not in result.columns:
+            raise ValueError(f"Unknown column {column}")
+        mappings = params.get("mappings", [])
+        value_map = {str(item.get("from")): item.get("to") for item in mappings if item.get("from") is not None}
+        default_value = params.get("default_value")
+
+        def map_value(value: Any) -> Any:
+            key = "" if value is None else str(value)
+            if key in value_map:
+                return value_map[key]
+            return value if default_value in (None, "") else default_value
+
+        result[output_column] = result[column].map(map_value)
+        output_type = params.get("output_type")
+        if output_type:
+            result[output_column] = _cast_series(result[output_column], output_type)
+        return result
+
+    def apply_groupby(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
+        group_columns = [col for col in params.get("group_columns", []) if col in df.columns]
+        aggregations = [item for item in params.get("aggregations", []) if item.get("column") in df.columns and item.get("function")]
+        if not group_columns:
+            raise ValueError("Group By needs at least one group column")
+        if not aggregations:
+            raise ValueError("Group By needs at least one aggregation")
+        named_aggs: dict[str, tuple[str, str]] = {}
+        for item in aggregations:
+            func = item["function"]
+            if func not in {"sum", "mean", "min", "max", "count", "first", "last"}:
+                raise ValueError(f"Unsupported aggregation {func}")
+            output = item.get("output_column") or f"{item['column']}_{func}"
+            named_aggs[output] = (item["column"], func)
+        return df.groupby(group_columns, dropna=False).agg(**named_aggs).reset_index()
+
+    def apply_pivot(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
+        index_columns = [col for col in params.get("index_columns", []) if col in df.columns]
+        pivot_column = params.get("pivot_column")
+        value_column = params.get("value_column")
+        aggfunc = params.get("aggfunc", "sum")
+        if not index_columns:
+            raise ValueError("Pivot needs index columns")
+        if pivot_column not in df.columns:
+            raise ValueError(f"Unknown pivot column {pivot_column}")
+        if value_column not in df.columns:
+            raise ValueError(f"Unknown value column {value_column}")
+        if aggfunc not in {"sum", "mean", "min", "max", "count", "first"}:
+            raise ValueError(f"Unsupported pivot aggregation {aggfunc}")
+        source = df.copy()
+        actual_value_column = value_column
+        actual_aggfunc = aggfunc
+        if aggfunc == "count":
+            actual_value_column = "__pivot_count"
+            source[actual_value_column] = 1
+            actual_aggfunc = "sum"
+        elif value_column in index_columns or value_column == pivot_column:
+            actual_value_column = "__pivot_value"
+            source[actual_value_column] = source[value_column]
+        pivoted = pd.pivot_table(source, index=index_columns, columns=pivot_column, values=actual_value_column, aggfunc=actual_aggfunc, fill_value=params.get("fill_value", 0))
+        pivoted = pivoted.reset_index()
+        pivoted.columns = [str(col) for col in pivoted.columns]
+        return pivoted
 
     def apply_deduplicate(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
         subset = [col for col in params.get("columns", []) if col in df.columns]
@@ -214,9 +313,21 @@ def validate_transforms(columns: list[str], steps: list[dict[str, Any]], destina
             current = [mapping.get(col, col) for col in current]
             if len(current) != len(set(current)):
                 errors.append(f"Step {index} creates duplicate output column names")
+        elif step_type == "join":
+            for column in params.get("right_columns", []):
+                if column and column not in current:
+                    current.append(column)
         elif step_type == "derive" and params.get("output_column"):
             if params["output_column"] not in current:
                 current.append(params["output_column"])
+        elif step_type == "value_map" and params.get("output_column"):
+            if params["output_column"] not in current:
+                current.append(params["output_column"])
+        elif step_type == "groupby" and params.get("group_columns") and params.get("aggregations"):
+            current = list(params["group_columns"])
+            current.extend(item.get("output_column") or f"{item.get('column')}_{item.get('function')}" for item in params.get("aggregations", []) if item.get("column") and item.get("function"))
+        elif step_type == "pivot" and params.get("index_columns"):
+            current = list(params["index_columns"])
         warnings.extend(validate_step_order(step, steps[: index - 1]))
     if destination_columns:
         missing_destination = [col for col in destination_columns if col not in current]
@@ -250,10 +361,14 @@ def human_step_name(step_type: str) -> str:
     return {
         "select": "Select Columns",
         "rename": "Rename Columns",
+        "join": "Join / Merge",
         "cast": "Change Data Type",
         "fillna": "Fill Null Values",
         "derive": "Add Derived Column",
         "filter": "Filter Rows",
+        "value_map": "Map Column Values",
+        "groupby": "Group By",
+        "pivot": "Pivot",
         "deduplicate": "Remove Duplicates",
         "sort": "Sort Rows",
     }.get(step_type, step_type.title())
@@ -280,6 +395,8 @@ def _referenced_columns(step: dict[str, Any]) -> set[str]:
         return set(params.get("columns", []))
     if step["step_type"] == "rename":
         return {item.get("source") for item in params.get("mappings", []) if item.get("source")}
+    if step["step_type"] == "join":
+        return {params.get("left_key")} if params.get("left_key") else set()
     if step["step_type"] == "cast":
         return {item.get("column") for item in params.get("casts", []) if item.get("column")}
     if step["step_type"] == "fillna":
@@ -288,6 +405,12 @@ def _referenced_columns(step: dict[str, Any]) -> set[str]:
         return {operand.get("value") for operand in (params.get("left", {}), params.get("right", {})) if operand.get("kind") == "column"}
     if step["step_type"] == "filter":
         return {item.get("column") for item in params.get("conditions", []) if item.get("column")}
+    if step["step_type"] == "value_map":
+        return {params.get("column")} if params.get("column") else set()
+    if step["step_type"] == "groupby":
+        return set(params.get("group_columns", [])) | {item.get("column") for item in params.get("aggregations", []) if item.get("column")}
+    if step["step_type"] == "pivot":
+        return set(params.get("index_columns", [])) | {col for col in (params.get("pivot_column"), params.get("value_column")) if col}
     if step["step_type"] == "deduplicate":
         return set(params.get("columns", []))
     if step["step_type"] == "sort":

@@ -1486,7 +1486,7 @@ const FILTER_OPERATORS = [
 ];
 
 const DATA_TYPES = ["string", "integer", "float", "boolean", "date", "datetime"];
-const AGG_FUNCS = ["sum", "mean", "min", "max", "count", "first", "last"];
+const AGG_FUNCS = ["sum", "mean", "min", "max", "count", "count_distinct", "first", "last"];
 
 function defaultSteps(): TransformationStep[] {
   return [

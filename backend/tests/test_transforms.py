@@ -1,4 +1,4 @@
-from app.services.transforms import apply_transforms
+from app.services.transforms import apply_transforms, validate_transforms
 
 
 def test_select_and_rename_fields():
@@ -154,6 +154,75 @@ def test_pivot_count_can_use_index_as_value_column():
                     "pivot_column": "vertical",
                     "value_column": "apac_card_number",
                     "aggfunc": "count",
+                },
+            }
+        ],
+    )
+
+    assert result == [{"apac_card_number": "1", "cards": 1, "loans": 1}, {"apac_card_number": "2", "cards": 1, "loans": 0}]
+
+
+def test_validate_select_allows_stale_missing_columns():
+    result = validate_transforms(
+        ["customer_id", "vertical"],
+        [
+            {
+                "id": "select",
+                "step_type": "select",
+                "step_name": "Select Columns",
+                "parameters": {"columns": ["customer_id", "id", "vertical"]},
+            }
+        ],
+    )
+
+    assert result["errors"] == []
+    assert result["warnings"] == ["Step 1 Select Columns ignores missing columns: id"]
+
+
+def test_groupby_count_distinct():
+    rows = [
+        {"segment": "A", "customer_id": "1"},
+        {"segment": "A", "customer_id": "1"},
+        {"segment": "A", "customer_id": "2"},
+        {"segment": "B", "customer_id": "3"},
+    ]
+    result = apply_transforms(
+        rows,
+        [
+            {
+                "id": "group",
+                "step_type": "groupby",
+                "step_name": "Group By",
+                "parameters": {
+                    "group_columns": ["segment"],
+                    "aggregations": [{"column": "customer_id", "function": "count_distinct", "output_column": "unique_customers"}],
+                },
+            }
+        ],
+    )
+
+    assert result == [{"segment": "A", "unique_customers": 2}, {"segment": "B", "unique_customers": 1}]
+
+
+def test_pivot_count_distinct_can_use_index_as_value_column():
+    rows = [
+        {"apac_card_number": "1", "vertical": "cards"},
+        {"apac_card_number": "1", "vertical": "cards"},
+        {"apac_card_number": "1", "vertical": "loans"},
+        {"apac_card_number": "2", "vertical": "cards"},
+    ]
+    result = apply_transforms(
+        rows,
+        [
+            {
+                "id": "pivot",
+                "step_type": "pivot",
+                "step_name": "Pivot",
+                "parameters": {
+                    "index_columns": ["apac_card_number"],
+                    "pivot_column": "vertical",
+                    "value_column": "apac_card_number",
+                    "aggfunc": "count_distinct",
                 },
             }
         ],

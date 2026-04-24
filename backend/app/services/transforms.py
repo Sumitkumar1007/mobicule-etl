@@ -241,10 +241,10 @@ class TransformationExecutor:
         named_aggs: dict[str, tuple[str, str]] = {}
         for item in aggregations:
             func = item["function"]
-            if func not in {"sum", "mean", "min", "max", "count", "first", "last"}:
+            if func not in {"sum", "mean", "min", "max", "count", "count_distinct", "first", "last"}:
                 raise ValueError(f"Unsupported aggregation {func}")
             output = item.get("output_column") or f"{item['column']}_{func}"
-            named_aggs[output] = (item["column"], func)
+            named_aggs[output] = (item["column"], "nunique" if func == "count_distinct" else func)
         return df.groupby(group_columns, dropna=False).agg(**named_aggs).reset_index()
 
     def apply_pivot(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
@@ -258,7 +258,7 @@ class TransformationExecutor:
             raise ValueError(f"Unknown pivot column {pivot_column}")
         if value_column not in df.columns:
             raise ValueError(f"Unknown value column {value_column}")
-        if aggfunc not in {"sum", "mean", "min", "max", "count", "first"}:
+        if aggfunc not in {"sum", "mean", "min", "max", "count", "count_distinct", "first"}:
             raise ValueError(f"Unsupported pivot aggregation {aggfunc}")
         source = df.copy()
         actual_value_column = value_column
@@ -267,6 +267,11 @@ class TransformationExecutor:
             actual_value_column = "__pivot_count"
             source[actual_value_column] = 1
             actual_aggfunc = "sum"
+        elif aggfunc == "count_distinct":
+            actual_aggfunc = "nunique"
+            if value_column in index_columns or value_column == pivot_column:
+                actual_value_column = "__pivot_distinct_value"
+                source[actual_value_column] = source[value_column]
         elif value_column in index_columns or value_column == pivot_column:
             actual_value_column = "__pivot_value"
             source[actual_value_column] = source[value_column]
@@ -304,7 +309,9 @@ def validate_transforms(columns: list[str], steps: list[dict[str, Any]], destina
         params = step["parameters"]
         step_type = step["step_type"]
         missing = sorted(_referenced_columns(step) - set(current))
-        if missing:
+        if missing and step_type == "select":
+            warnings.append(f"Step {index} {step['step_name']} ignores missing columns: {', '.join(missing)}")
+        elif missing:
             errors.append(f"Step {index} {step['step_name']} references missing columns: {', '.join(missing)}")
         if step_type == "select" and params.get("columns"):
             current = [col for col in params["columns"] if col in current]

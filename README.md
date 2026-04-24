@@ -98,6 +98,36 @@ On current host, network frontend is usually:
 http://10.10.0.10:5173/
 ```
 
+## Run As Services
+
+To keep backend and frontend alive after terminal closes, use `systemd`.
+
+Service files in repo:
+
+- `deploy/systemd/mobiflow-backend.service`
+- `deploy/systemd/mobiflow-frontend.service`
+
+Install:
+
+```bash
+sudo cp deploy/systemd/mobiflow-backend.service /etc/systemd/system/
+sudo cp deploy/systemd/mobiflow-frontend.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now mobiflow-backend
+sudo systemctl enable --now mobiflow-frontend
+```
+
+Useful commands:
+
+```bash
+sudo systemctl status mobiflow-backend
+sudo systemctl status mobiflow-frontend
+sudo journalctl -u mobiflow-backend -f
+sudo journalctl -u mobiflow-frontend -f
+sudo systemctl restart mobiflow-backend
+sudo systemctl restart mobiflow-frontend
+```
+
 ## Logo
 
 The app tries to load:

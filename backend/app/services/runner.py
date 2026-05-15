@@ -19,6 +19,10 @@ logger = logging.getLogger(__name__)
 executor = ThreadPoolExecutor(max_workers=4)
 
 
+class RunStopped(RuntimeError):
+    pass
+
+
 def enqueue_run(pipeline_id: int) -> int:
     with db() as conn:
         row = conn.execute(
@@ -38,12 +42,16 @@ def preview(source_key: str, source_config: dict[str, Any], transforms: list[dic
 def run_pipeline(run_id: int) -> None:
     try:
         pipeline = _load_pipeline(run_id)
-        _mark_running(run_id)
+        if not _mark_running(run_id):
+            _log(run_id, "INFO", "Run was stopped before it started")
+            return
         _log(run_id, "INFO", f"Run started for pipeline {pipeline['name']}")
         rows = extract(pipeline["source_key"], pipeline["source_config"])
+        _ensure_running(run_id)
         _update_counts(run_id, rows_read=len(rows))
         _log(run_id, "INFO", f"Extracted {len(rows)} rows")
         result = preview_transforms(rows, prepare_runtime_transforms(pipeline["transforms"], pipeline["source_key"], pipeline["source_config"]))
+        _ensure_running(run_id)
         rows = result.rows
         for step_log in result.logs:
             _log(run_id, step_log.level, step_log.message)
@@ -51,9 +59,13 @@ def run_pipeline(run_id: int) -> None:
         for warning in result.warnings:
             _log(run_id, "WARNING", warning)
         _log(run_id, "INFO", f"Final output rows: {len(rows)}")
+        _ensure_running(run_id)
         written = load(pipeline["destination_key"], pipeline["destination_config"], rows)
+        _ensure_running(run_id)
         _succeed(run_id, written)
         _log(run_id, "INFO", f"Run succeeded, wrote {written} rows")
+    except RunStopped as exc:
+        _log(run_id, "INFO", str(exc))
     except Exception as exc:
         logger.exception("Pipeline run failed")
         _fail(run_id, str(exc))
@@ -191,9 +203,7 @@ def _load_postgres(config: dict[str, Any], rows: list[dict[str, Any]]) -> int:
     schema = "".join(ch for ch in config.get("schema", "public") if ch.isalnum() or ch == "_")
     table = "".join(ch for ch in config["table"] if ch.isalnum() or ch == "_")
     columns = [str(key) for key in rows[0].keys()]
-    quoted_columns = ", ".join(f'"{col}"' for col in columns)
-    placeholders = ", ".join(["%s"] * len(columns))
-    sql = f'INSERT INTO "{schema}"."{table}" ({quoted_columns}) VALUES ({placeholders})'
+    sql = _postgres_write_sql(schema, table, columns, config)
     with psycopg.connect(
         host=config["host"],
         port=int(config.get("port", 5432)),
@@ -205,6 +215,30 @@ def _load_postgres(config: dict[str, Any], rows: list[dict[str, Any]]) -> int:
         with conn.cursor() as cursor:
             cursor.executemany(sql, [tuple(row.get(col) for col in columns) for row in rows])
     return len(rows)
+
+
+def _postgres_write_sql(schema: str, table: str, columns: list[str], config: dict[str, Any]) -> str:
+    quoted_columns = ", ".join(_quote_identifier(col) for col in columns)
+    placeholders = ", ".join(["%s"] * len(columns))
+    sql = f"INSERT INTO {_quote_identifier(schema)}.{_quote_identifier(table)} ({quoted_columns}) VALUES ({placeholders})"
+    if config.get("mode") != "upsert":
+        return sql
+    primary_key = str(config.get("primary_key") or "").strip()
+    if not primary_key:
+        raise ValueError("PostgreSQL upsert needs primary_key")
+    if primary_key not in columns:
+        raise ValueError(f"PostgreSQL upsert primary key {primary_key} is not in output rows")
+    update_columns = [col for col in columns if col != primary_key]
+    if not update_columns:
+        return f"{sql} ON CONFLICT ({_quote_identifier(primary_key)}) DO NOTHING"
+    assignments = ", ".join(f"{_quote_identifier(col)}=EXCLUDED.{_quote_identifier(col)}" for col in update_columns)
+    return f"{sql} ON CONFLICT ({_quote_identifier(primary_key)}) DO UPDATE SET {assignments}"
+
+
+def _quote_identifier(value: str) -> str:
+    if not value:
+        raise ValueError("PostgreSQL identifier cannot be empty")
+    return '"' + value.replace('"', '""') + '"'
 
 
 def _load_sftp(config: dict[str, Any], rows: list[dict[str, Any]]) -> int:
@@ -384,9 +418,21 @@ def _load_pipeline(run_id: int) -> dict[str, Any]:
     return data
 
 
-def _mark_running(run_id: int) -> None:
+def _mark_running(run_id: int) -> bool:
     with db() as conn:
-        conn.execute("UPDATE runs SET status='running', started_at=CURRENT_TIMESTAMP WHERE id=?", (run_id,))
+        cursor = conn.execute("UPDATE runs SET status='running', started_at=CURRENT_TIMESTAMP WHERE id=? AND status='queued'", (run_id,))
+        return cursor.rowcount == 1
+
+
+def _ensure_running(run_id: int) -> None:
+    with db() as conn:
+        row = conn.execute("SELECT status, error FROM runs WHERE id=?", (run_id,)).fetchone()
+    if row is None:
+        raise RunStopped(f"Run {run_id} no longer exists")
+    data = dict(row)
+    if data["status"] != "running":
+        reason = data.get("error") or data["status"]
+        raise RunStopped(f"Run stopped: {reason}")
 
 
 def _update_counts(run_id: int, rows_read: int) -> None:
@@ -397,7 +443,7 @@ def _update_counts(run_id: int, rows_read: int) -> None:
 def _succeed(run_id: int, rows_written: int) -> None:
     with db() as conn:
         conn.execute(
-            "UPDATE runs SET status='succeeded', rows_written=?, finished_at=CURRENT_TIMESTAMP WHERE id=?",
+            "UPDATE runs SET status='succeeded', rows_written=?, finished_at=CURRENT_TIMESTAMP WHERE id=? AND status='running'",
             (rows_written, run_id),
         )
 
@@ -405,7 +451,7 @@ def _succeed(run_id: int, rows_written: int) -> None:
 def _fail(run_id: int, error: str) -> None:
     with db() as conn:
         conn.execute(
-            "UPDATE runs SET status='failed', error=?, finished_at=CURRENT_TIMESTAMP WHERE id=?",
+            "UPDATE runs SET status='failed', error=?, finished_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('queued', 'running')",
             (error, run_id),
         )
 

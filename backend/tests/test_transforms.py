@@ -323,3 +323,28 @@ def test_custom_transform_declared_output_columns_help_validation():
     )
 
     assert result["errors"] == []
+
+
+def test_validate_deduplicate_and_sort_missing_columns():
+    result = validate_transforms(
+        ["customer_id"],
+        [
+            {
+                "id": "dedupe",
+                "step_type": "deduplicate",
+                "step_name": "Remove Duplicates",
+                "parameters": {"columns": ["missing_id"]},
+            },
+            {
+                "id": "sort",
+                "step_type": "sort",
+                "step_name": "Sort Rows",
+                "parameters": {"column": "missing_sort"},
+            },
+        ],
+    )
+
+    assert result["errors"] == [
+        "Step 1 Remove Duplicates references missing columns: missing_id",
+        "Step 2 Sort Rows references missing columns: missing_sort",
+    ]

@@ -468,7 +468,6 @@ def _referenced_columns(step: dict[str, Any]) -> set[str]:
         return set(params.get("index_columns", [])) | {col for col in (params.get("pivot_column"), params.get("value_column")) if col}
     if step["step_type"] == "custom":
         return set()
-    return set()
     if step["step_type"] == "deduplicate":
         return set(params.get("columns", []))
     if step["step_type"] == "sort":

@@ -189,10 +189,10 @@ def init_db() -> None:
                 """,
                 (bootstrap_hash, settings.bootstrap_admin_email),
             )
-        _sync_postgres_connection_configs(conn, settings.metadata_database_url)
+        _fill_missing_postgres_connection_configs(conn, settings.metadata_database_url)
 
 
-def _sync_postgres_connection_configs(conn: PgDb, database_url: str) -> None:
+def _fill_missing_postgres_connection_configs(conn: PgDb, database_url: str) -> None:
     parsed = urlparse(database_url)
     defaults = {
         "host": parsed.hostname or "",
@@ -212,8 +212,9 @@ def _sync_postgres_connection_configs(conn: PgDb, database_url: str) -> None:
         config = decode(dict(row)["config"])
         if not isinstance(config, dict):
             continue
-        next_config = {**config, **defaults}
-        conn.execute("UPDATE resources SET config=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (encode(next_config), dict(row)["id"]))
+        next_config = _with_missing_defaults(config, defaults)
+        if next_config != config:
+            conn.execute("UPDATE resources SET config=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (encode(next_config), dict(row)["id"]))
     pipeline_rows = conn.execute(
         """
         SELECT id, source_key, destination_key, source_config, destination_config
@@ -226,9 +227,9 @@ def _sync_postgres_connection_configs(conn: PgDb, database_url: str) -> None:
         source_config = decode(data["source_config"])
         destination_config = decode(data["destination_config"])
         if data["source_key"] == "postgres_source" and isinstance(source_config, dict):
-            source_config = {**source_config, **defaults}
+            source_config = _with_missing_defaults(source_config, defaults)
         if data["destination_key"] == "postgres_destination" and isinstance(destination_config, dict):
-            destination_config = {**destination_config, **defaults}
+            destination_config = _with_missing_defaults(destination_config, defaults)
         conn.execute(
             """
             UPDATE pipelines
@@ -237,6 +238,14 @@ def _sync_postgres_connection_configs(conn: PgDb, database_url: str) -> None:
             """,
             (encode(source_config), encode(destination_config), data["id"]),
         )
+
+
+def _with_missing_defaults(config: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
+    next_config = dict(config)
+    for key, value in defaults.items():
+        if next_config.get(key) in (None, ""):
+            next_config[key] = value
+    return next_config
 
 
 def encode(value: Any) -> str:

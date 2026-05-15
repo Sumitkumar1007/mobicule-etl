@@ -12,3 +12,4 @@ dist/
 .env
 .DS_Store
 Screenshot*.png
+backend/app.db

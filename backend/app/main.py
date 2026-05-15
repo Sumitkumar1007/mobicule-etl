@@ -6,6 +6,8 @@ from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.routes import router
 from app.core.config import get_settings
@@ -18,6 +20,10 @@ configure_logging()
 settings = get_settings()
 
 app = FastAPI(title=settings.app_name, version="0.1.0")
+if settings.force_https:
+    app.add_middleware(HTTPSRedirectMiddleware)
+if settings.allowed_hosts:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,

@@ -192,6 +192,7 @@ Tables created by `init_db()`:
 - `runs`: run status, row counts, errors.
 - `run_logs`: human-readable run logs.
 - `transformation_run_logs`: step-level transform logs.
+- `audit_logs`: admin/support mutation trail for production review.
 
 Schema is currently created with `CREATE TABLE IF NOT EXISTS` and small `ALTER TABLE` statements. No formal migration tool yet.
 
@@ -573,12 +574,13 @@ Execution:
 Scheduler:
 
 - In-process only.
-- Not safe for multi-instance deployments without duplicate-run protection.
+- Uses PostgreSQL advisory locking to avoid duplicate scheduler ticks across backend instances.
+- Still not a durable external scheduler.
 
 Security:
 
-- Raw SQL source query is trusted-admin-only.
-- Custom Python transform is trusted-admin-only.
+- Raw SQL source query is gated in production and must be explicitly enabled for trusted read-only users.
+- Custom Python transform is disabled in production unless explicitly enabled for trusted admins.
 - Connector secrets are stored in metadata DB config JSON.
 - Frontend token is in `localStorage`.
 
@@ -600,23 +602,23 @@ Near term:
 - Add API integration tests for auth, transformations, pipeline run lifecycle, and scheduler.
 - Split frontend into feature modules.
 - Add secret masking/encryption for connector credentials.
-- Add explicit SQL safety rules or read-only database users for source queries.
-- Add better run cancellation for long extract/load operations.
+- Use read-only database users for source queries.
+- Add stronger cancellation inside long connector extract/load operations.
 
 Medium term:
 
 - Move runner to durable queue.
 - Add worker process isolation for custom transforms.
-- Add scheduler locking for multi-instance deployments.
+- Move scheduler ownership to an external orchestrator if many backend replicas are needed.
 - Add row streaming/chunking for large datasets.
 - Add structured run metrics.
 - Add retry policy and dead-letter handling.
 
 Production hardening:
 
-- Use HTTPS.
-- Set strict CORS origins.
+- Use `MOBIFLOW_FORCE_HTTPS=true` behind a trusted HTTPS proxy.
+- Set strict `MOBIFLOW_CORS_ORIGINS` and `MOBIFLOW_ALLOWED_HOSTS`.
 - Rotate bootstrap/admin credentials.
 - Use least-privilege DB users.
 - Disable or sandbox custom Python if users are not fully trusted.
-- Add audit logs for admin changes.
+- Audit logs are stored for admin/support mutations; ship them to SIEM/log archive in production.

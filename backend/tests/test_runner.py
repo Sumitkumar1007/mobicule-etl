@@ -1,4 +1,5 @@
 from app.services.runner import _postgres_write_sql, _same_connection_join_config
+from app.services.sql_safety import validate_source_query
 
 
 def test_same_connection_postgres_join_config():
@@ -60,3 +61,25 @@ def test_postgres_upsert_requires_primary_key_in_rows():
         assert "primary key customer_id is not in output rows" in str(exc)
     else:
         raise AssertionError("Expected missing primary key to fail")
+
+
+def test_validate_source_query_accepts_single_select():
+    assert validate_source_query("select * from customers;") == "select * from customers"
+
+
+def test_validate_source_query_blocks_mutation_keywords():
+    try:
+        validate_source_query("delete from customers")
+    except ValueError as exc:
+        assert "SELECT or WITH" in str(exc)
+    else:
+        raise AssertionError("Expected mutating query to fail")
+
+
+def test_validate_source_query_blocks_multiple_statements():
+    try:
+        validate_source_query("select * from customers; drop table customers")
+    except ValueError as exc:
+        assert "single read-only statement" in str(exc)
+    else:
+        raise AssertionError("Expected multiple statements to fail")

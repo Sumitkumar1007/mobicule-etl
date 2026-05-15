@@ -5,6 +5,7 @@ from app.connectors.registry import get_connector, list_connectors
 from app.db.database import db, decode, encode
 from app.models.schemas import (
     ConnectorDefinition,
+    AuditLog,
     AuthResponse,
     ChangePasswordRequest,
     LoginRequest,
@@ -99,19 +100,24 @@ def sources() -> list[Resource]:
 @router.post("/sources", response_model=Resource)
 def create_source(payload: ResourceCreate, request: Request) -> Resource:
     require_role(request, {"admin"})
-    return _create_resource("source", payload)
+    resource = _create_resource("source", payload)
+    _audit(request, "create", "source", resource.id, {"name": resource.name, "connector_key": resource.connector_key})
+    return resource
 
 
 @router.put("/sources/{resource_id}", response_model=Resource)
 def update_source(resource_id: int, payload: ResourceUpdate, request: Request) -> Resource:
     require_role(request, {"admin"})
-    return _update_resource("source", resource_id, payload)
+    resource = _update_resource("source", resource_id, payload)
+    _audit(request, "update", "source", resource.id, {"name": resource.name, "connector_key": resource.connector_key})
+    return resource
 
 
 @router.delete("/sources/{resource_id}")
 def delete_source(resource_id: int, request: Request) -> dict[str, str]:
     require_role(request, {"admin"})
     _delete_resource("source", resource_id)
+    _audit(request, "delete", "source", resource_id, {})
     return {"status": "deleted"}
 
 
@@ -123,19 +129,24 @@ def destinations() -> list[Resource]:
 @router.post("/destinations", response_model=Resource)
 def create_destination(payload: ResourceCreate, request: Request) -> Resource:
     require_role(request, {"admin"})
-    return _create_resource("destination", payload)
+    resource = _create_resource("destination", payload)
+    _audit(request, "create", "destination", resource.id, {"name": resource.name, "connector_key": resource.connector_key})
+    return resource
 
 
 @router.put("/destinations/{resource_id}", response_model=Resource)
 def update_destination(resource_id: int, payload: ResourceUpdate, request: Request) -> Resource:
     require_role(request, {"admin"})
-    return _update_resource("destination", resource_id, payload)
+    resource = _update_resource("destination", resource_id, payload)
+    _audit(request, "update", "destination", resource.id, {"name": resource.name, "connector_key": resource.connector_key})
+    return resource
 
 
 @router.delete("/destinations/{resource_id}")
 def delete_destination(resource_id: int, request: Request) -> dict[str, str]:
     require_role(request, {"admin"})
     _delete_resource("destination", resource_id)
+    _audit(request, "delete", "destination", resource_id, {})
     return {"status": "deleted"}
 
 
@@ -174,7 +185,9 @@ def create_pipeline(payload: PipelineCreate, request: Request) -> Pipeline:
                 payload.schedule,
             ),
         ).fetchone()
-    return _pipeline_from_row(row)
+    pipeline = _pipeline_from_row(row)
+    _audit(request, "create", "pipeline", pipeline.id, {"name": pipeline.name})
+    return pipeline
 
 
 @router.put("/pipelines/{pipeline_id}", response_model=Pipeline)
@@ -207,7 +220,9 @@ def update_pipeline(pipeline_id: int, payload: PipelineUpdate, request: Request)
                 pipeline_id,
             ),
         ).fetchone()
-    return _pipeline_from_row(row)
+    pipeline = _pipeline_from_row(row)
+    _audit(request, "update", "pipeline", pipeline.id, {"name": pipeline.name, "enabled": pipeline.enabled})
+    return pipeline
 
 
 @router.delete("/pipelines/{pipeline_id}")
@@ -215,6 +230,7 @@ def delete_pipeline(pipeline_id: int, request: Request) -> dict[str, str]:
     require_role(request, {"admin"})
     with db() as conn:
         conn.execute("DELETE FROM pipelines WHERE id=?", (pipeline_id,))
+    _audit(request, "delete", "pipeline", pipeline_id, {})
     return {"status": "deleted"}
 
 
@@ -258,7 +274,9 @@ def create_transformation(payload: TransformationCreate, request: Request) -> Tr
                 encode([step.model_dump() for step in payload.steps]),
             ),
         ).fetchone()
-    return _transformation_from_row(row)
+    transformation = _transformation_from_row(row)
+    _audit(request, "create", "transformation", transformation.id, {"name": transformation.name})
+    return transformation
 
 
 @router.get("/transformations/{transformation_id}", response_model=Transformation)
@@ -273,7 +291,9 @@ def get_transformation(transformation_id: int) -> Transformation:
 @router.put("/transformations/{transformation_id}", response_model=Transformation)
 def update_transformation(transformation_id: int, payload: TransformationUpdate, request: Request) -> Transformation:
     require_role(request, {"admin"})
-    return _update_transformation_record(transformation_id, payload)
+    transformation = _update_transformation_record(transformation_id, payload)
+    _audit(request, "update", "transformation", transformation.id, {"name": transformation.name, "status": transformation.status})
+    return transformation
 
 
 def _update_transformation_record(transformation_id: int, payload: TransformationUpdate) -> Transformation:
@@ -309,6 +329,7 @@ def delete_transformation(transformation_id: int, request: Request) -> dict[str,
     require_role(request, {"admin"})
     with db() as conn:
         conn.execute("DELETE FROM transformations WHERE id=?", (transformation_id,))
+    _audit(request, "delete", "transformation", transformation_id, {})
     return {"status": "deleted"}
 
 
@@ -431,7 +452,9 @@ def publish_transformation(transformation_id: int, request: Request) -> Transfor
             """,
             (transformation_id, version, encode(snapshot)),
         )
-    return _transformation_from_row(row)
+    published = _transformation_from_row(row)
+    _audit(request, "publish", "transformation", published.id, {"name": published.name, "version": published.version})
+    return published
 
 
 @router.get("/pipelines/{pipeline_id}", response_model=Pipeline)
@@ -451,6 +474,7 @@ def start_run(pipeline_id: int, request: Request) -> Run:
     if exists is None:
         raise HTTPException(status_code=404, detail="Pipeline not found")
     run_id = enqueue_run(pipeline_id)
+    _audit(request, "run", "pipeline", pipeline_id, {"run_id": run_id})
     return get_run(run_id)
 
 
@@ -466,6 +490,7 @@ def stop_run(run_id: int, request: Request) -> Run:
             """,
             (run_id,),
         )
+    _audit(request, "stop", "run", run_id, {})
     return get_run(run_id)
 
 
@@ -529,7 +554,17 @@ def create_user(payload: UserCreate, request: Request) -> User:
             """,
             (payload.name, payload.email, payload.role, hash_password(payload.password)),
         ).fetchone()
-    return User(**dict(row))
+    user = User(**dict(row))
+    _audit(request, "create", "user", user.id, {"email": user.email, "role": user.role})
+    return user
+
+
+@router.get("/audit-logs", response_model=list[AuditLog])
+def audit_logs(request: Request) -> list[AuditLog]:
+    require_role(request, {"admin"})
+    with db() as conn:
+        rows = conn.execute("SELECT * FROM audit_logs ORDER BY id DESC LIMIT 200").fetchall()
+    return [_audit_log_from_row(row) for row in rows]
 
 
 @router.post("/preview")
@@ -661,6 +696,24 @@ def _run_from_row(row) -> RunWithPipeline:
     data = dict(row)
     data["duration_seconds"] = _duration(data.get("started_at"), data.get("finished_at"))
     return RunWithPipeline(**data)
+
+
+def _audit(request: Request, action: str, entity_type: str, entity_id: object | None, details: dict[str, object]) -> None:
+    user = current_user(request)
+    with db() as conn:
+        conn.execute(
+            """
+            INSERT INTO audit_logs (actor_user_id, actor_email, action, entity_type, entity_id, details)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (user.id, user.email, action, entity_type, None if entity_id is None else str(entity_id), encode(details)),
+        )
+
+
+def _audit_log_from_row(row) -> AuditLog:
+    data = dict(row)
+    data["details"] = decode(data.get("details") or "{}")
+    return AuditLog(**data)
 
 
 def _duration(started_at: str | None, finished_at: str | None) -> float | None:

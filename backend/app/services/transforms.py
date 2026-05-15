@@ -5,6 +5,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from app.core.config import get_settings
+
 
 STEP_ORDER = {
     "select": 1,
@@ -288,6 +290,9 @@ class TransformationExecutor:
         code = str(params.get("code") or "").strip()
         if not code:
             return df
+        settings = get_settings()
+        if settings.is_production and not settings.allow_custom_transforms:
+            raise ValueError("Custom Python transforms are disabled in production. Enable MOBIFLOW_ALLOW_CUSTOM_TRANSFORMS only for trusted admins.")
         safe_builtins = {
             "abs": abs,
             "all": all,

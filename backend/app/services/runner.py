@@ -13,6 +13,7 @@ import httpx
 
 from app.connectors.registry import get_connector
 from app.db.database import db, decode, encode
+from app.services.sql_safety import validate_source_query
 from app.services.transforms import preview_transforms
 
 logger = logging.getLogger(__name__)
@@ -113,7 +114,9 @@ def _extract_postgres(config: dict[str, Any]) -> list[dict[str, Any]]:
         raise RuntimeError("psycopg is required for PostgreSQL extraction. Install backend requirements.") from exc
 
     query = config.get("query")
-    if not query:
+    if query:
+        query = validate_source_query(str(query))
+    else:
         schema = "".join(ch for ch in config.get("schema", "public") if ch.isalnum() or ch == "_")
         table = "".join(ch for ch in config["table"] if ch.isalnum() or ch == "_")
         query = f'SELECT * FROM "{schema}"."{table}" LIMIT 1000'

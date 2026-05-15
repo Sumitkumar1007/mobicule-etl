@@ -203,3 +203,14 @@ class ChangePasswordRequest(BaseModel):
 class AuthResponse(BaseModel):
     token: str
     user: User
+
+
+class AuditLog(BaseModel):
+    id: int
+    actor_user_id: int | None = None
+    actor_email: str | None = None
+    action: str
+    entity_type: str
+    entity_id: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+    created_at: str

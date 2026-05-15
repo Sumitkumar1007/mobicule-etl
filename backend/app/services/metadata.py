@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 
 from app.services.runner import extract
+from app.services.sql_safety import validate_source_query
 
 
 def source_columns(source_key: str, config: dict[str, Any]) -> list[str]:
@@ -67,7 +68,8 @@ def _postgres_columns(config: dict[str, Any]) -> list[str]:
             return [row[0] for row in rows]
         if query:
             try:
-                cursor = conn.execute(f"SELECT * FROM ({query}) AS preview_source LIMIT 0")
+                safe_query = validate_source_query(str(query))
+                cursor = conn.execute(f"SELECT * FROM ({safe_query}) AS preview_source LIMIT 0")
             except Exception as exc:
                 raise ValueError(
                     "PostgreSQL column fetch failed. Fix the SQL query, or clear Query and use Schema/Table fields. "

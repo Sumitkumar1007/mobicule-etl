@@ -163,6 +163,17 @@ def init_db() -> None:
                 revoked_at TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id SERIAL PRIMARY KEY,
+                actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                actor_email TEXT,
+                action TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                entity_id TEXT,
+                details TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             """
         )
         conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT")

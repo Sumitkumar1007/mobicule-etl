@@ -41,6 +41,7 @@ frontend/
 docs/
   SOP.md                       Detailed user guide
   TRANSFORMATION_GUIDE.md      Detailed transformation builder guide
+  TEAM_TECHNICAL_OVERVIEW.md   Technical overview for engineering handoff
 ```
 
 ## Environment

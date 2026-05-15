@@ -29,6 +29,7 @@ from app.models.schemas import (
     TransformationVersion,
     User,
     UserCreate,
+    UserUpdate,
 )
 from app.core.security import hash_password, hash_token, verify_password
 from app.services.auth import bearer_token, current_user, login, logout, require_role
@@ -557,6 +558,62 @@ def create_user(payload: UserCreate, request: Request) -> User:
     user = User(**dict(row))
     _audit(request, "create", "user", user.id, {"email": user.email, "role": user.role})
     return user
+
+
+@router.put("/users/{user_id}", response_model=User)
+def update_user(user_id: int, payload: UserUpdate, request: Request) -> User:
+    require_role(request, {"admin"})
+    update = payload.model_dump(exclude_unset=True)
+    if not update:
+        raise HTTPException(status_code=400, detail="No user changes provided")
+    with db() as conn:
+        row = conn.execute("SELECT id, name, email, role, created_at FROM users WHERE id=?", (user_id,)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        current = dict(row)
+        current.update({key: value for key, value in update.items() if key != "password" and value is not None})
+        if update.get("password"):
+            row = conn.execute(
+                """
+                UPDATE users
+                SET name=?, email=?, role=?, password_hash=?
+                WHERE id=?
+                RETURNING id, name, email, role, created_at
+                """,
+                (current["name"], current["email"], current["role"], hash_password(update["password"]), user_id),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                UPDATE users
+                SET name=?, email=?, role=?
+                WHERE id=?
+                RETURNING id, name, email, role, created_at
+                """,
+                (current["name"], current["email"], current["role"], user_id),
+            ).fetchone()
+    user = User(**dict(row))
+    _audit(request, "update", "user", user.id, {"email": user.email, "role": user.role})
+    return user
+
+
+@router.delete("/users/{user_id}")
+def delete_user(user_id: int, request: Request) -> dict[str, str]:
+    require_role(request, {"admin"})
+    actor = current_user(request)
+    if actor.id == user_id:
+        raise HTTPException(status_code=400, detail="You cannot delete your own user")
+    with db() as conn:
+        row = conn.execute("SELECT email, role FROM users WHERE id=?", (user_id,)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        if dict(row)["role"] == "admin":
+            admins = conn.execute("SELECT COUNT(*) AS count FROM users WHERE role='admin'").fetchone()
+            if int(dict(admins)["count"]) <= 1:
+                raise HTTPException(status_code=400, detail="At least one admin user is required")
+        conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+    _audit(request, "delete", "user", user_id, {"email": dict(row)["email"]})
+    return {"status": "deleted"}
 
 
 @router.get("/audit-logs", response_model=list[AuditLog])

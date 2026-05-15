@@ -208,7 +208,6 @@ def _fill_missing_postgres_connection_configs(conn: PgDb, database_url: str) -> 
     defaults = {
         "host": parsed.hostname or "",
         "port": parsed.port or 5432,
-        "database": parsed.path.lstrip("/"),
         "username": parsed.username or "",
         "password": parsed.password or "",
     }

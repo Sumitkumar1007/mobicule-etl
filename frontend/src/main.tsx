@@ -172,9 +172,10 @@ function App() {
     destination_config: {} as Record<string, unknown>,
     status: "draft" as Transformation["status"],
     version: 1,
-    steps: defaultSteps()
+    steps: [] as TransformationStep[]
   });
   const [userForm, setUserForm] = useState({ name: "", email: "", password: "", role: "viewer" as User["role"] });
+  const [editingUserId, setEditingUserId] = useState<number | null>(null);
   const [passwordForm, setPasswordForm] = useState({ current_password: "", new_password: "", confirm_password: "" });
   const [form, setForm] = useState({
     name: "Customer pipeline",
@@ -228,8 +229,6 @@ function App() {
       ...current,
       source_config: refreshedConfig(current.source_config, connectorData.find((item) => item.key === current.source_key) ?? connectorData.find((item) => item.key === "postgres_source")),
       destination_config: refreshedConfig(current.destination_config, connectorData.find((item) => item.key === current.destination_key) ?? connectorData.find((item) => item.key === "postgres_destination")),
-      source_id: current.source_id || (editingPipelineId ? "" : String(sourceData[0]?.id ?? "")),
-      destination_id: current.destination_id || (editingPipelineId ? "" : String(destinationData[0]?.id ?? "")),
       transformation_id: current.transformation_id || String(transformationData.find((item) => item.status === "published")?.id ?? "")
     }));
     setTransformationDraft((current) => ({
@@ -289,17 +288,17 @@ function App() {
   }, [activeMenu, transformationDraft.destination_id, transformationDraft.destination_config, destinationResources]);
 
   async function savePipeline() {
-    const selectedSource = sourceResources.find((item) => String(item.id) === form.source_id);
-    const selectedDestination = destinationResources.find((item) => String(item.id) === form.destination_id);
-    if (!selectedSource || !selectedDestination) {
-      throw new Error("Select datasource and destination first");
-    }
     const selectedTransformation = transformations.find((item) => String(item.id) === form.transformation_id);
     const selectedVersion = transformationVersions.find(
       (item) => String(item.transformation_id) === form.transformation_id && String(item.version_no) === form.transformation_version
     );
     const versionSnapshot = selectedVersion?.snapshot_data;
     const effectiveTransformation = versionSnapshot ?? selectedTransformation;
+    const selectedSource = sourceResources.find((item) => item.id === effectiveTransformation?.source_id);
+    const selectedDestination = destinationResources.find((item) => item.id === effectiveTransformation?.destination_id);
+    if (!effectiveTransformation || !selectedSource || !selectedDestination) {
+      throw new Error("Select a published transformation with datasource and destination");
+    }
     const payload = {
       name: form.name,
       source_id: Number(selectedSource.id),
@@ -376,10 +375,21 @@ function App() {
     URL.revokeObjectURL(url);
   }
 
-  async function createUser() {
-    await api<User>("/users", { method: "POST", body: JSON.stringify(userForm) });
+  async function saveUser() {
+    const payload = editingUserId && !userForm.password ? { name: userForm.name, email: userForm.email, role: userForm.role } : userForm;
+    await api<User>(editingUserId ? `/users/${editingUserId}` : "/users", {
+      method: editingUserId ? "PUT" : "POST",
+      body: JSON.stringify(payload)
+    });
+    setEditingUserId(null);
     setUserForm({ name: "", email: "", password: "", role: "viewer" });
-    setToast({ tone: "ok", text: "User created" });
+    setToast({ tone: "ok", text: editingUserId ? "User updated" : "User created" });
+    await refresh();
+  }
+
+  async function deleteUser(id: number) {
+    await api(`/users/${id}`, { method: "DELETE" });
+    setToast({ tone: "ok", text: "User deleted" });
     await refresh();
   }
 
@@ -441,7 +451,7 @@ function App() {
     const saved = await saveTransformationDraft();
     const result = await api<Transformation>(`/transformations/${saved.id}/publish`, { method: "POST" });
     loadTransformation(result);
-    setForm({ ...form, transformation_id: String(result.id), transformation_version: "latest" });
+    setForm({ ...form, transformation_id: String(result.id), transformation_version: "latest", source_id: String(result.source_id ?? ""), destination_id: String(result.destination_id ?? "") });
     setToast({ tone: "ok", text: `Published v${result.version}` });
     await refresh();
   }
@@ -457,7 +467,7 @@ function App() {
       destination_config: transformation.destination_config ?? {},
       status: transformation.status,
       version: transformation.version,
-      steps: transformation.steps.length ? transformation.steps : defaultSteps()
+      steps: transformation.steps
     });
     setPreviewData(null);
     setValidationData(null);
@@ -475,7 +485,7 @@ function App() {
       destination_config: {},
       status: "draft",
       version: 1,
-      steps: defaultSteps()
+      steps: []
     });
     setPreviewData(null);
     setValidationData(null);
@@ -819,33 +829,22 @@ function App() {
             <label>Name<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
             <label>Cron schedule<input value={form.schedule} onChange={(event) => setForm({ ...form, schedule: event.target.value })} placeholder="0 * * * *" /></label>
             <label>
-              Datasource
-              <select value={form.source_id} onChange={(event) => setForm({ ...form, source_id: event.target.value })}>
-                <option value="">Select datasource</option>
-                {sourceResources.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-              </select>
-            </label>
-            <label>
-              Destination
-              <select value={form.destination_id} onChange={(event) => setForm({ ...form, destination_id: event.target.value })}>
-                <option value="">Select destination</option>
-                {destinationResources.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-              </select>
-            </label>
-            <label>
               Transformation
-              <select value={form.transformation_id} onChange={(event) => setForm({ ...form, transformation_id: event.target.value, transformation_version: "latest" })}>
-                <option value="">No transformation</option>
+              <select value={form.transformation_id} onChange={(event) => {
+                const selected = transformations.find((item) => String(item.id) === event.target.value);
+                setForm({ ...form, transformation_id: event.target.value, transformation_version: "latest", source_id: String(selected?.source_id ?? ""), destination_id: String(selected?.destination_id ?? "") });
+              }}>
+                <option value="">Select transformation</option>
                 {transformations.filter((item) => item.status === "published").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
               </select>
             </label>
-            <label>
+            {form.transformation_id && <label>
               Transformation version
               <select value={form.transformation_version} onChange={(event) => setForm({ ...form, transformation_version: event.target.value })}>
                 <option value="latest">Latest published</option>
                 {selectedTransformationVersions.map((item) => <option key={item.id} value={String(item.version_no)}>v{item.version_no}</option>)}
               </select>
-            </label>
+            </label>}
           </div>
           <div className="routePreview">
             <span>{sourceResources.find((item) => String(item.id) === form.source_id)?.name ?? "Source"}</span>
@@ -947,7 +946,7 @@ function App() {
           <div className="formGrid three">
             <label>Name<input value={userForm.name} onChange={(event) => setUserForm({ ...userForm, name: event.target.value })} /></label>
             <label>Email<input value={userForm.email} onChange={(event) => setUserForm({ ...userForm, email: event.target.value })} /></label>
-            <label>Password<input type="password" value={userForm.password} minLength={10} onChange={(event) => setUserForm({ ...userForm, password: event.target.value })} /></label>
+            <label>Password<input type="password" value={userForm.password} minLength={10} onChange={(event) => setUserForm({ ...userForm, password: event.target.value })} placeholder={editingUserId ? "Leave blank to keep current password" : ""} /></label>
             <label>
               Role
               <select value={userForm.role} onChange={(event) => setUserForm({ ...userForm, role: event.target.value as User["role"] })}>
@@ -957,7 +956,10 @@ function App() {
               </select>
             </label>
           </div>
-          <div className="actions"><button className="primary" onClick={() => createUser().catch(showError)}>Create user</button></div>
+          <div className="actions">
+            <button className="primary" onClick={() => saveUser().catch(showError)}>{editingUserId ? "Update user" : "Create user"}</button>
+            {editingUserId && <button className="ghost" onClick={() => { setEditingUserId(null); setUserForm({ name: "", email: "", password: "", role: "viewer" }); }}>Cancel</button>}
+          </div>
           <div className="roleGrid">
             <RoleCard role="Admin" text="Full access, users, pipelines, schedules, runs, logs." />
             <RoleCard role="Support" text="Trigger pipelines and view pipelines/logs." />
@@ -970,6 +972,8 @@ function App() {
                 <strong>{user.name}</strong>
                 <span>{user.email}</span>
                 <span>{user.role}</span>
+                <button className="ghost small" onClick={() => { setEditingUserId(user.id); setUserForm({ name: user.name, email: user.email, password: "", role: user.role }); }}>Edit</button>
+                <button className="ghost small" onClick={() => deleteUser(user.id).catch(showError)}>Delete</button>
               </div>
             ))}
           </div>
@@ -1078,13 +1082,12 @@ function DatasetTargetEditor({ title, resource, value, options, onChange }: { ti
     return <div className="formGrid two">
       <label>{title} schema<input value={String(value.schema ?? "public")} onChange={(event) => onChange({ ...value, schema: event.target.value })} placeholder="public" /></label>
       <label>{title} table<SelectOrInput value={String(value.table ?? "")} options={options.tables} placeholder="customers" onChange={(next) => onChange({ ...value, table: next })} /></label>
-      <label className="editor fullWidth">{title} query<textarea value={String(value.query ?? "")} onChange={(event) => onChange({ ...value, query: event.target.value })} placeholder="Optional custom SQL for source rows" /></label>
     </div>;
   }
   if (resource.connector_key === "sftp_source") {
     const fileOptions = sftpPathOptions(resource, options.paths, String(value.remote_path ?? ""));
     return <div className="formGrid two">
-      <label>{title} file name<SelectOrInput value={String(value.remote_path ?? "")} options={fileOptions} placeholder="customers.csv" onChange={(next) => onChange({ ...value, remote_path: next })} /></label>
+      <label>{title} file path<SelectOrInput value={String(value.remote_path ?? "")} options={fileOptions} placeholder="customers.csv" onChange={(next) => onChange({ ...value, remote_path: next })} /></label>
       <label>{title} format<select value={String(value.format ?? "csv")} onChange={(event) => onChange({ ...value, format: event.target.value })}><option value="csv">csv</option><option value="xlsx">xlsx</option></select></label>
     </div>;
   }
@@ -1099,7 +1102,7 @@ function DatasetTargetEditor({ title, resource, value, options, onChange }: { ti
   if (resource.connector_key === "sftp_destination") {
     const fileOptions = sftpPathOptions(resource, options.paths, String(value.remote_path ?? ""));
     return <div className="formGrid two">
-      <label>{title} output file name<SelectOrInput value={String(value.remote_path ?? "")} options={fileOptions} placeholder="result.csv" onChange={(next) => onChange({ ...value, remote_path: next })} /></label>
+      <label>{title} output path<SelectOrInput value={String(value.remote_path ?? "")} options={fileOptions} placeholder="result.csv" onChange={(next) => onChange({ ...value, remote_path: next })} /></label>
       <label>{title} format<select value={String(value.format ?? "csv")} onChange={(event) => onChange({ ...value, format: event.target.value })}><option value="csv">csv</option><option value="xlsx">xlsx</option></select></label>
     </div>;
   }
@@ -1108,32 +1111,12 @@ function DatasetTargetEditor({ title, resource, value, options, onChange }: { ti
 
 function SelectOrInput({ value, options, placeholder, onChange }: { value: string; options: Array<string | { label: string; value: string }>; placeholder: string; onChange: (value: string) => void }) {
   const normalizedOptions = options.map((item) => typeof item === "string" ? { label: item, value: item } : item);
-  const mergedOptions = value && !normalizedOptions.some((item) => item.value === value)
-    ? [{ label: value, value }, ...normalizedOptions]
-    : normalizedOptions;
-  const [mode, setMode] = useState<"select" | "custom">(mergedOptions.length > 0 ? "select" : "custom");
-
-  useEffect(() => {
-    if (!mergedOptions.length) {
-      setMode("custom");
-      return;
-    }
-    setMode("select");
-  }, [mergedOptions, value]);
-
-  if (mode === "custom") {
-    return <div className="selectOrInput">
-      <input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />
-      {mergedOptions.length > 0 && <button className="ghost small" type="button" onClick={() => { setMode("select"); if (!value && mergedOptions[0]) onChange(mergedOptions[0].value); }}>Select From List</button>}
-    </div>;
-  }
-
+  const listId = useMemo(() => `options-${makeId()}`, []);
   return <div className="selectOrInput">
-    <select value={mergedOptions.some((item) => item.value === value) ? value : ""} onChange={(event) => onChange(event.target.value)}>
-      <option value="">Select</option>
-      {mergedOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-    </select>
-    <button className="ghost small" type="button" onClick={() => setMode("custom")}>Custom</button>
+    <input list={normalizedOptions.length ? listId : undefined} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />
+    {normalizedOptions.length > 0 && <datalist id={listId}>
+      {normalizedOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+    </datalist>}
   </div>;
 }
 
@@ -1687,7 +1670,6 @@ const STEP_TYPES: { type: StepType; label: string; description: string }[] = [
   { type: "value_map", label: "Map Column Values", description: "Map values such as yes to 1 and no to 0" },
   { type: "groupby", label: "Group By", description: "Aggregate rows by one or more columns" },
   { type: "pivot", label: "Pivot", description: "Turn values from rows into output columns" },
-  { type: "custom", label: "Custom Transform", description: "Run custom Python against the current dataframe" },
   { type: "deduplicate", label: "Remove Duplicates", description: "Drop duplicate rows by subset" },
   { type: "sort", label: "Sort Rows", description: "Order output rows" }
 ];
@@ -1708,7 +1690,7 @@ const FILTER_OPERATORS = [
 
 const DATA_TYPES = ["string", "integer", "float", "boolean", "date", "datetime"];
 const AGG_FUNCS = ["sum", "mean", "min", "max", "count", "count_distinct", "first", "last"];
-const CONNECTION_TARGET_FIELDS = new Set(["schema", "table", "query", "path_pattern", "output_path_pattern", "format", "mode", "primary_key"]);
+const CONNECTION_TARGET_FIELDS = new Set(["schema", "table", "query", "path_pattern", "output_path_pattern", "operation", "format", "mode", "primary_key"]);
 
 function defaultSteps(): TransformationStep[] {
   return [
@@ -1896,7 +1878,6 @@ function sampleConfigForKey(key: string) {
       username: "",
       password: "",
       remote_path: "",
-      operation: key.includes("destination") ? "write" : "read"
     }, null, 2);
   }
   return JSON.stringify({

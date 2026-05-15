@@ -24,7 +24,6 @@ SFTP_FIELDS = {
     "remote_path": {"type": "string"},
     "path_pattern": {"type": "string"},
     "output_path_pattern": {"type": "string"},
-    "operation": {"type": "string", "enum": ["read", "write"], "default": "read"},
     "format": {"type": "string", "enum": ["csv", "xlsx"], "default": "csv"},
 }
 
@@ -74,7 +73,7 @@ CONNECTORS: dict[str, ConnectorDefinition] = {
         config_schema={
             "type": "object",
             "required": ["host", "username"],
-            "properties": {**SFTP_FIELDS, "operation": {"type": "string", "enum": ["write"], "default": "write"}},
+            "properties": SFTP_FIELDS,
         },
     ),
 }
@@ -105,7 +104,6 @@ def _postgres_defaults() -> dict[str, object]:
     return {
         "host": parsed.hostname or "",
         "port": parsed.port or 5432,
-        "database": parsed.path.lstrip("/"),
         "username": parsed.username or "",
         "password": parsed.password or "",
         "schema": "public",

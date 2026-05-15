@@ -251,7 +251,7 @@ def _load_sftp(config: dict[str, Any], rows: list[dict[str, Any]]) -> int:
         import paramiko
     except ImportError as exc:
         raise RuntimeError("paramiko is required for SFTP destination. Install backend requirements.") from exc
-    remote_path = config["remote_path"]
+    remote_path = _sftp_write_path(config)
     if config.get("format") == "xlsx" or remote_path.endswith(".xlsx"):
         payload: str | bytes = _xlsx_from_rows(rows)
     else:
@@ -326,7 +326,6 @@ def _same_connection_join_config(base_source_key: str, base_source_config: dict[
         format_override = overrides.get("format")
         if format_override not in (None, ""):
             next_config["format"] = format_override
-        next_config["operation"] = "read"
         if not next_config.get("remote_path"):
             raise ValueError("Join source needs remote path")
         return next_config
@@ -354,6 +353,19 @@ def _sftp_read_paths(client, config: dict[str, Any]) -> list[str]:
     directory = posixpath.dirname(pattern) or "."
     filename_pattern = posixpath.basename(pattern)
     return [posixpath.join(directory, item) for item in client.listdir(directory) if fnmatch.fnmatch(item, filename_pattern)]
+
+
+def _sftp_write_path(config: dict[str, Any]) -> str:
+    remote_path = str(config.get("remote_path") or "").strip()
+    pattern = str(config.get("output_path_pattern") or "").strip()
+    if not remote_path and pattern:
+        remote_path = _format_path_pattern(pattern)
+    if not remote_path:
+        raise ValueError("SFTP destination needs output path")
+    if remote_path.endswith("/"):
+        default_name = "output.xlsx" if config.get("format") == "xlsx" else "output.csv"
+        return posixpath.join(remote_path, default_name)
+    return remote_path
 
 
 def _format_path_pattern(pattern: str) -> str:

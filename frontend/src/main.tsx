@@ -245,6 +245,12 @@ function App() {
   }, [currentUser]);
 
   useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 3000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  useEffect(() => {
     if (!currentUser || activeMenu === "transforms") return;
     const timer = window.setInterval(() => refresh().catch(showError), 4000);
     return () => window.clearInterval(timer);
@@ -895,29 +901,31 @@ function App() {
                 <strong>{pipeline.name}</strong>
                 <span>{labelFor(connectors, pipeline.source_key)} → {labelFor(connectors, pipeline.destination_key)}</span>
                 <span>{pipeline.schedule || "Manual"}</span>
-                {isAdmin && <label className="toggle smallToggle" title={pipeline.enabled ? "Enabled" : "Disabled"} aria-label={pipeline.enabled ? "Disable pipeline" : "Enable pipeline"}><input type="checkbox" checked={pipeline.enabled} onChange={(event) => setPipelineEnabled(pipeline, event.target.checked).catch(showError)} /></label>}
-                {!isAdmin && <span>{pipeline.enabled ? "Active" : "Inactive"}</span>}
-                {isAdmin && <button className="ghost small" onClick={() => {
-                  setEditingPipelineId(pipeline.id);
-                  setForm({
-                    ...form,
-                    name: pipeline.name,
-                    source_id: String(findResourceId(sourceResources, pipeline.source_key, pipeline.source_config, pipeline.source_id) ?? ""),
-                    destination_id: String(findResourceId(destinationResources, pipeline.destination_key, pipeline.destination_config, pipeline.destination_id) ?? ""),
-                    transformation_id: String(findTransformationId(transformations, pipeline.transforms) ?? ""),
-                    transformation_version: String(findTransformationVersion(transformationVersions, pipeline.transforms) ?? "latest"),
-                    source_key: pipeline.source_key,
-                    destination_key: pipeline.destination_key,
-                    source_config: JSON.stringify(pipeline.source_config, null, 2),
-                    destination_config: JSON.stringify(pipeline.destination_config, null, 2),
-                    transforms: JSON.stringify(pipeline.transforms, null, 2),
-                    schedule: pipeline.schedule || ""
-                  });
-                }}>Edit</button>}
                 {activeRun && <span>{activeRun.status} #{activeRun.id}</span>}
-                {canRun && activeRun && <button className="ghost small" onClick={() => stopRun(activeRun.id).catch(showError)}>Stop</button>}
-                {canRun && !activeRun && <button className="primary small" disabled={!pipeline.enabled} onClick={() => runPipeline(pipeline.id).catch(showError)}>Run</button>}
-                {isAdmin && <button className="ghost small" onClick={() => deletePipeline(pipeline.id).catch(showError)}>Delete</button>}
+                <div className="pipelineActions">
+                  {isAdmin && <label className="toggle smallToggle" title={pipeline.enabled ? "Enabled" : "Disabled"} aria-label={pipeline.enabled ? "Disable pipeline" : "Enable pipeline"}><input type="checkbox" checked={pipeline.enabled} onChange={(event) => setPipelineEnabled(pipeline, event.target.checked).catch(showError)} /></label>}
+                  {!isAdmin && <span>{pipeline.enabled ? "Active" : "Inactive"}</span>}
+                  {isAdmin && <button className="ghost small" onClick={() => {
+                    setEditingPipelineId(pipeline.id);
+                    setForm({
+                      ...form,
+                      name: pipeline.name,
+                      source_id: String(findResourceId(sourceResources, pipeline.source_key, pipeline.source_config, pipeline.source_id) ?? ""),
+                      destination_id: String(findResourceId(destinationResources, pipeline.destination_key, pipeline.destination_config, pipeline.destination_id) ?? ""),
+                      transformation_id: String(findTransformationId(transformations, pipeline.transforms) ?? ""),
+                      transformation_version: String(findTransformationVersion(transformationVersions, pipeline.transforms) ?? "latest"),
+                      source_key: pipeline.source_key,
+                      destination_key: pipeline.destination_key,
+                      source_config: JSON.stringify(pipeline.source_config, null, 2),
+                      destination_config: JSON.stringify(pipeline.destination_config, null, 2),
+                      transforms: JSON.stringify(pipeline.transforms, null, 2),
+                      schedule: pipeline.schedule || ""
+                    });
+                  }}>Edit</button>}
+                  {canRun && activeRun && <button className="ghost small" onClick={() => stopRun(activeRun.id).catch(showError)}>Stop</button>}
+                  {canRun && !activeRun && <button className="primary small" disabled={!pipeline.enabled} onClick={() => runPipeline(pipeline.id).catch(showError)}>Run</button>}
+                  {isAdmin && <button className="ghost small" onClick={() => deletePipeline(pipeline.id).catch(showError)}>Delete</button>}
+                </div>
               </div>
               );
             })}

@@ -595,15 +595,25 @@ textarea {
   cursor: pointer;
 }
 
-.resourceActions {
+.resourceActions,
+.pipelineActions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   white-space: nowrap;
 }
 
-.resourceActions .small {
+.resourceActions .small,
+.pipelineActions .small {
   min-width: 76px;
+}
+
+.pipelineActions {
+  align-items: center;
+}
+
+.pipelineActions .smallToggle {
+  margin-right: 4px;
 }
 
 .mappingTable {

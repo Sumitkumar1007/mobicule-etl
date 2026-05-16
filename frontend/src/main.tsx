@@ -878,7 +878,9 @@ function App() {
             </div>
           </div>
           <div className="table">
-            {pipelines.map((pipeline) => (
+            {pipelines.map((pipeline) => {
+              const activeRun = activeRunForPipeline(runs, pipeline.id);
+              return (
               <div className="row" key={pipeline.id}>
                 <span>#{pipeline.id}</span>
                 <strong>{pipeline.name}</strong>
@@ -901,10 +903,13 @@ function App() {
                     schedule: pipeline.schedule || ""
                   });
                 }}>Edit</button>}
-                {canRun && <button className="primary small" onClick={() => runPipeline(pipeline.id).catch(showError)}>Run</button>}
+                {activeRun && <span>{activeRun.status} #{activeRun.id}</span>}
+                {canRun && activeRun && <button className="ghost small" onClick={() => stopRun(activeRun.id).catch(showError)}>Stop</button>}
+                {canRun && !activeRun && <button className="primary small" onClick={() => runPipeline(pipeline.id).catch(showError)}>Run</button>}
                 {isAdmin && <button className="ghost small" onClick={() => deletePipeline(pipeline.id).catch(showError)}>Delete</button>}
               </div>
-            ))}
+              );
+            })}
           </div>
         </section>}
 
@@ -1786,6 +1791,10 @@ function findTransformationVersion(versions: TransformationVersion[], steps: Rec
 
 function stepsFromVersion(version: TransformationVersion): TransformationStep[] {
   return Array.isArray(version.snapshot_data?.steps) ? version.snapshot_data.steps : [];
+}
+
+function activeRunForPipeline(runs: Run[], pipelineId: number) {
+  return runs.find((run) => run.pipeline_id === pipelineId && (run.status === "queued" || run.status === "running"));
 }
 
 function stableJson(value: unknown): string {

@@ -1113,7 +1113,7 @@ function DatasetTargetEditor({ title, resource, value, options, onChange }: { ti
     return <div className="formGrid two">
       <label>{title} schema<input value={String(value.schema ?? "public")} onChange={(event) => onChange({ ...value, schema: event.target.value })} placeholder="public" /></label>
       <label>{title} table<SelectOrInput value={String(value.table ?? "")} options={options.tables} placeholder="customer_summary" onChange={(next) => onChange({ ...value, table: next })} /></label>
-      <label>Mode<select value={String(value.mode ?? "append")} onChange={(event) => onChange({ ...value, mode: event.target.value })}><option value="append">append</option><option value="upsert">upsert</option></select></label>
+      <label>Mode<select value={String(value.mode ?? "append")} onChange={(event) => onChange({ ...value, mode: event.target.value })}><option value="append">append</option><option value="upsert">upsert</option><option value="truncate_insert">truncate + insert</option></select></label>
       <label>Primary key<input value={String(value.primary_key ?? "")} onChange={(event) => onChange({ ...value, primary_key: event.target.value })} placeholder="customer_id" /></label>
     </div>;
   }

@@ -196,8 +196,6 @@ def load(destination_key: str, config: dict[str, Any], rows: list[dict[str, Any]
 
 
 def _load_postgres(config: dict[str, Any], rows: list[dict[str, Any]]) -> int:
-    if not rows:
-        return 0
     try:
         import psycopg
     except ImportError as exc:
@@ -205,8 +203,8 @@ def _load_postgres(config: dict[str, Any], rows: list[dict[str, Any]]) -> int:
 
     schema = "".join(ch for ch in config.get("schema", "public") if ch.isalnum() or ch == "_")
     table = "".join(ch for ch in config["table"] if ch.isalnum() or ch == "_")
-    columns = [str(key) for key in rows[0].keys()]
-    sql = _postgres_write_sql(schema, table, columns, config)
+    columns = [str(key) for key in rows[0].keys()] if rows else []
+    sql = _postgres_write_sql(schema, table, columns, config) if rows else ""
     with psycopg.connect(
         host=config["host"],
         port=int(config.get("port", 5432)),
@@ -216,7 +214,10 @@ def _load_postgres(config: dict[str, Any], rows: list[dict[str, Any]]) -> int:
         connect_timeout=10,
     ) as conn:
         with conn.cursor() as cursor:
-            cursor.executemany(sql, [tuple(row.get(col) for col in columns) for row in rows])
+            if config.get("mode") == "truncate_insert":
+                cursor.execute(f"TRUNCATE TABLE {_quote_identifier(schema)}.{_quote_identifier(table)}")
+            if rows:
+                cursor.executemany(sql, [tuple(row.get(col) for col in columns) for row in rows])
     return len(rows)
 
 
@@ -224,6 +225,8 @@ def _postgres_write_sql(schema: str, table: str, columns: list[str], config: dic
     quoted_columns = ", ".join(_quote_identifier(col) for col in columns)
     placeholders = ", ".join(["%s"] * len(columns))
     sql = f"INSERT INTO {_quote_identifier(schema)}.{_quote_identifier(table)} ({quoted_columns}) VALUES ({placeholders})"
+    if config.get("mode") in {"truncate_insert", "truncate"}:
+        return sql
     if config.get("mode") != "upsert":
         return sql
     primary_key = str(config.get("primary_key") or "").strip()

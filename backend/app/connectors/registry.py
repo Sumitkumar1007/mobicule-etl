@@ -60,7 +60,7 @@ CONNECTORS: dict[str, ConnectorDefinition] = {
             "required": ["host", "database", "username", "password"],
             "properties": {
                 **POSTGRES_FIELDS,
-                "mode": {"type": "string", "enum": ["append", "upsert"], "default": "append"},
+                "mode": {"type": "string", "enum": ["append", "upsert", "truncate_insert"], "default": "append"},
                 "primary_key": {"type": "string"},
             },
         },

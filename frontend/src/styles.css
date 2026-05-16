@@ -1451,12 +1451,12 @@ body,
 }
 
 .shell {
-  grid-template-columns: 252px minmax(0, 1fr);
+  grid-template-columns: 230px minmax(0, 1fr);
 }
 
 .rail {
-  display: grid;
-  grid-template-rows: auto 1fr auto;
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
   background: var(--sidebar);
   border-right: 1px solid var(--line);
@@ -1465,37 +1465,40 @@ body,
 }
 
 .brand {
-  min-height: 142px;
+  min-height: 112px;
   margin-bottom: 0;
-  padding: 28px 20px 20px 30px;
+  padding: 22px 18px 16px 24px;
   background: #ffffff;
   border-bottom: 1px solid var(--line);
 }
 
 .logoImage {
-  width: 214px;
-  height: 72px;
-  margin-left: -26px;
+  width: 188px;
+  height: 58px;
+  margin-left: -20px;
 }
 
 .brandTagline {
-  margin-left: -8px;
+  margin-left: -2px;
   color: #783f98;
   font-size: 12px;
 }
 
 nav {
-  gap: 6px;
-  padding: 16px 12px 20px;
+  flex: 1;
+  align-content: start;
+  gap: 8px;
+  overflow-y: auto;
+  padding: 16px 12px;
 }
 
 nav button {
-  min-height: 48px;
+  min-height: 42px;
   border: 1px solid transparent;
   border-radius: 8px;
   color: #334155;
-  font-size: 15px;
-  padding: 0 14px;
+  font-size: 14px;
+  padding: 0 12px;
   transform: none;
 }
 
@@ -1516,13 +1519,13 @@ nav button.active {
   padding: 34px 40px;
 }
 .railFooter {
-  padding: 16px 12px 20px;
+  padding: 12px;
   border-top: 1px solid var(--line);
 }
 
 .logoutButton {
   width: 100%;
-  min-height: 44px;
+  min-height: 40px;
   justify-content: center;
 }
 

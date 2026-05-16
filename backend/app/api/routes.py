@@ -5,6 +5,8 @@ from app.connectors.registry import get_connector, list_connectors
 from app.db.database import db, decode, encode
 from app.models.schemas import (
     ConnectorDefinition,
+    ConnectorTestRequest,
+    ConnectorTestResponse,
     AuditLog,
     AuthResponse,
     ChangePasswordRequest,
@@ -33,6 +35,7 @@ from app.models.schemas import (
 )
 from app.core.security import hash_password, hash_token, verify_password
 from app.services.auth import bearer_token, current_user, login, logout, require_role
+from app.services.connectivity import test_connection
 from app.services.metadata import source_columns, source_options
 from app.services.runner import enqueue_run, extract, prepare_runtime_transforms, preview
 from app.services.transforms import preview_transforms, validate_transforms
@@ -91,6 +94,17 @@ def change_password(payload: ChangePasswordRequest, request: Request) -> dict[st
 @router.get("/connectors", response_model=list[ConnectorDefinition])
 def connectors() -> list[ConnectorDefinition]:
     return list_connectors()
+
+
+@router.post("/connectors/test", response_model=ConnectorTestResponse)
+def connector_test(payload: ConnectorTestRequest, request: Request) -> ConnectorTestResponse:
+    require_role(request, {"admin"})
+    try:
+        get_connector(payload.connector_key)
+        message = test_connection(payload.connector_key, payload.config)
+    except Exception as exc:
+        return ConnectorTestResponse(ok=False, message=str(exc))
+    return ConnectorTestResponse(ok=True, message=message)
 
 
 @router.get("/sources", response_model=list[Resource])

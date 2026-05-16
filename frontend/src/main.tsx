@@ -149,6 +149,7 @@ function App() {
   const [resourceName, setResourceName] = useState("");
   const [editingResource, setEditingResource] = useState<Resource | null>(null);
   const [editingPipelineId, setEditingPipelineId] = useState<number | null>(null);
+  const [testingConnectorKey, setTestingConnectorKey] = useState<string | null>(null);
   const [sourceColumns, setSourceColumns] = useState<string[]>([]);
   const [destinationColumns, setDestinationColumns] = useState<string[]>([]);
   const [sourceTargetOptions, setSourceTargetOptions] = useState<{ tables: string[]; paths: string[] }>({ tables: [], paths: [] });
@@ -356,6 +357,19 @@ function App() {
     await api(`/pipelines/${id}`, { method: "DELETE" });
     setToast({ tone: "ok", text: "Pipeline deleted" });
     await refresh();
+  }
+
+  async function testConnector(connectorKey: string, config: Record<string, unknown>, label: string) {
+    setTestingConnectorKey(label);
+    try {
+      const result = await api<{ ok: boolean; message: string }>("/connectors/test", {
+        method: "POST",
+        body: JSON.stringify({ connector_key: connectorKey, config })
+      });
+      setToast({ tone: result.ok ? "ok" : "bad", text: result.message });
+    } finally {
+      setTestingConnectorKey(null);
+    }
   }
 
   async function stopRun(id: number) {
@@ -654,6 +668,8 @@ function App() {
             onNameChange={setResourceName}
             onConfigChange={(value) => setForm({ ...form, source_config: value })}
             onCreate={() => createResource("source").catch(showError)}
+            onTest={(connectorKey, config, label) => testConnector(connectorKey, config, label).catch(showError)}
+            testingKey={testingConnectorKey}
             onDelete={(id) => deleteResource("source", id).catch(showError)}
             onEdit={(resource) => {
               setEditingResource(resource);
@@ -682,6 +698,8 @@ function App() {
             onNameChange={setResourceName}
             onConfigChange={(value) => setForm({ ...form, destination_config: value })}
             onCreate={() => createResource("destination").catch(showError)}
+            onTest={(connectorKey, config, label) => testConnector(connectorKey, config, label).catch(showError)}
+            testingKey={testingConnectorKey}
             onDelete={(id) => deleteResource("destination", id).catch(showError)}
             onEdit={(resource) => {
               setEditingResource(resource);
@@ -1505,6 +1523,8 @@ function ConnectorCatalog({
   onNameChange,
   onConfigChange,
   onCreate,
+  onTest,
+  testingKey,
   onDelete,
   onEdit,
   onSelect,
@@ -1521,6 +1541,8 @@ function ConnectorCatalog({
   onNameChange: (value: string) => void;
   onConfigChange: (value: string) => void;
   onCreate: () => void;
+  onTest: (connectorKey: string, config: Record<string, unknown>, label: string) => void;
+  testingKey: string | null;
   onDelete: (id: number) => void;
   onEdit: (resource: Resource) => void;
   onSelect: (connector: Connector) => void;
@@ -1557,9 +1579,14 @@ function ConnectorCatalog({
               <h2>{selected.name}</h2>
             </div>
             {!readOnly && (
-              <button className="primary" onClick={onCreate}>
-                {isEditing ? "Update" : "Create"} {selected.type === "source" ? "datasource" : "destination"}
-              </button>
+              <div className="actions tight">
+                <button className="ghost" onClick={() => onTest(selected.key, safeParseObject(configValue), `draft-${selected.key}`)} disabled={testingKey === `draft-${selected.key}`}>
+                  {testingKey === `draft-${selected.key}` ? "Testing..." : "Test connection"}
+                </button>
+                <button className="primary" onClick={onCreate}>
+                  {isEditing ? "Update" : "Create"} {selected.type === "source" ? "datasource" : "destination"}
+                </button>
+              </div>
             )}
           </div>
           <div className="formGrid two">
@@ -1590,6 +1617,7 @@ function ConnectorCatalog({
             <span>{resource.connection_count} connections</span>
             <span>{resource.last_sync || "-"}</span>
             <span>{resource.status}</span>
+            {!readOnly && <button className="ghost small" onClick={() => onTest(resource.connector_key, resource.config, `saved-${resource.id}`)} disabled={testingKey === `saved-${resource.id}`}>{testingKey === `saved-${resource.id}` ? "Testing..." : "Test"}</button>}
             {!readOnly && <button className="ghost small" onClick={() => onEdit(resource)}>Edit</button>}
             {!readOnly && <button className="ghost small" onClick={() => onDelete(resource.id)}>Delete</button>}
           </div>

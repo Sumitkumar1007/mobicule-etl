@@ -16,6 +16,16 @@ class ConnectorDefinition(BaseModel):
     config_schema: dict[str, Any]
 
 
+class ConnectorTestRequest(BaseModel):
+    connector_key: str
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class ConnectorTestResponse(BaseModel):
+    ok: bool
+    message: str
+
+
 class ResourceCreate(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     connector_key: str

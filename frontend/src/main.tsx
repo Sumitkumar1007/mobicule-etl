@@ -359,6 +359,15 @@ function App() {
     await refresh();
   }
 
+  async function setPipelineEnabled(pipeline: Pipeline, enabled: boolean) {
+    await api<Pipeline>(`/pipelines/${pipeline.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled })
+    });
+    setToast({ tone: "ok", text: `Pipeline ${enabled ? "enabled" : "disabled"}` });
+    await refresh();
+  }
+
   async function testConnector(connectorKey: string, config: Record<string, unknown>, label: string) {
     setTestingConnectorKey(label);
     try {
@@ -886,6 +895,8 @@ function App() {
                 <strong>{pipeline.name}</strong>
                 <span>{labelFor(connectors, pipeline.source_key)} → {labelFor(connectors, pipeline.destination_key)}</span>
                 <span>{pipeline.schedule || "Manual"}</span>
+                {isAdmin && <label className="toggle smallToggle"><input type="checkbox" checked={pipeline.enabled} onChange={(event) => setPipelineEnabled(pipeline, event.target.checked).catch(showError)} />{pipeline.enabled ? "Enabled" : "Disabled"}</label>}
+                {!isAdmin && <span>{pipeline.enabled ? "Enabled" : "Disabled"}</span>}
                 {isAdmin && <button className="ghost small" onClick={() => {
                   setEditingPipelineId(pipeline.id);
                   setForm({
@@ -905,7 +916,7 @@ function App() {
                 }}>Edit</button>}
                 {activeRun && <span>{activeRun.status} #{activeRun.id}</span>}
                 {canRun && activeRun && <button className="ghost small" onClick={() => stopRun(activeRun.id).catch(showError)}>Stop</button>}
-                {canRun && !activeRun && <button className="primary small" onClick={() => runPipeline(pipeline.id).catch(showError)}>Run</button>}
+                {canRun && !activeRun && <button className="primary small" disabled={!pipeline.enabled} onClick={() => runPipeline(pipeline.id).catch(showError)}>Run</button>}
                 {isAdmin && <button className="ghost small" onClick={() => deletePipeline(pipeline.id).catch(showError)}>Delete</button>}
               </div>
               );

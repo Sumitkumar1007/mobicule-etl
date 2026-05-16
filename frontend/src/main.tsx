@@ -1647,9 +1647,11 @@ function ConnectorCatalog({
             <span>{resource.connection_count} connections</span>
             <span>{resource.last_sync || "-"}</span>
             <span>{resource.status}</span>
-            {!readOnly && <button className="ghost small" onClick={() => onTest(resource.connector_key, resource.config, `saved-${resource.id}`)} disabled={testingKey === `saved-${resource.id}`}>{testingKey === `saved-${resource.id}` ? "Testing..." : "Test"}</button>}
-            {!readOnly && <button className="ghost small" onClick={() => onEdit(resource)}>Edit</button>}
-            {!readOnly && <button className="ghost small" onClick={() => onDelete(resource.id)}>Delete</button>}
+            {!readOnly && <div className="resourceActions">
+              <button className="ghost small" onClick={() => onTest(resource.connector_key, resource.config, `saved-${resource.id}`)} disabled={testingKey === `saved-${resource.id}`}>{testingKey === `saved-${resource.id}` ? "Testing..." : "Test"}</button>
+              <button className="ghost small" onClick={() => onEdit(resource)}>Edit</button>
+              <button className="ghost small" onClick={() => onDelete(resource.id)}>Delete</button>
+            </div>}
           </div>
         ))}
       </div>

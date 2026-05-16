@@ -595,6 +595,17 @@ textarea {
   cursor: pointer;
 }
 
+.resourceActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.resourceActions .small {
+  min-width: 76px;
+}
+
 .mappingTable {
   display: grid;
   gap: 10px;

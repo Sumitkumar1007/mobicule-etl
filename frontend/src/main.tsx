@@ -630,6 +630,9 @@ function App() {
           <button className={activeMenu === "runs" ? "active" : ""} onClick={() => setActiveMenu("runs")}>Runs & Logs</button>
           {isAdmin && <button className={activeMenu === "access" ? "active" : ""} onClick={() => setActiveMenu("access")}>Access Control</button>}
         </nav>
+        <div className="railFooter">
+          <button className="ghost logoutButton" onClick={logout}>Logout</button>
+        </div>
       </aside>
 
       <section className="workspace">
@@ -638,14 +641,11 @@ function App() {
             <p className="eyebrow">No-code data movement</p>
           </div>
           <div className="topbarActions">
-            <span className="userBadge">{currentUser.name} · {currentUser.role}</span>
             {isAdmin && activeMenu === "pipelines" && <button className="primary" onClick={() => savePipeline().catch(showError)}>{editingPipelineId ? "Update pipeline" : "Save pipeline"}</button>}
-            <button className="ghost" onClick={() => setShowPasswordPanel((value) => !value)}>Change Password</button>
-            <button className="ghost" onClick={logout}>Logout</button>
           </div>
         </header>
 
-        {showPasswordPanel && (
+        {showPasswordPanel && activeMenu === "access" && (
           <section className="panel accountPanel">
             <div className="panelHead">
               <div>
@@ -895,8 +895,8 @@ function App() {
                 <strong>{pipeline.name}</strong>
                 <span>{labelFor(connectors, pipeline.source_key)} → {labelFor(connectors, pipeline.destination_key)}</span>
                 <span>{pipeline.schedule || "Manual"}</span>
-                {isAdmin && <label className="toggle smallToggle"><input type="checkbox" checked={pipeline.enabled} onChange={(event) => setPipelineEnabled(pipeline, event.target.checked).catch(showError)} />{pipeline.enabled ? "Enabled" : "Disabled"}</label>}
-                {!isAdmin && <span>{pipeline.enabled ? "Enabled" : "Disabled"}</span>}
+                {isAdmin && <label className="toggle smallToggle" title={pipeline.enabled ? "Enabled" : "Disabled"} aria-label={pipeline.enabled ? "Disable pipeline" : "Enable pipeline"}><input type="checkbox" checked={pipeline.enabled} onChange={(event) => setPipelineEnabled(pipeline, event.target.checked).catch(showError)} /></label>}
+                {!isAdmin && <span>{pipeline.enabled ? "Active" : "Inactive"}</span>}
                 {isAdmin && <button className="ghost small" onClick={() => {
                   setEditingPipelineId(pipeline.id);
                   setForm({
@@ -970,7 +970,20 @@ function App() {
           </div>
         </section>}
 
-        {activeMenu === "access" && <section className="panel">
+        {activeMenu === "access" && <>
+        <section className="panel accountSummaryPanel">
+          <div className="panelHead">
+            <div>
+              <p className="eyebrow">Account</p>
+              <h2>Account Controls</h2>
+            </div>
+          </div>
+          <div className="accountSummary">
+            <span className="userBadge">{currentUser.name} · {currentUser.role}</span>
+            <button className="ghost" onClick={() => setShowPasswordPanel((value) => !value)}>Change Password</button>
+          </div>
+        </section>
+        <section className="panel">
           <div className="panelHead">
             <div>
               <p className="eyebrow">Authentication & Authorization</p>
@@ -1011,7 +1024,8 @@ function App() {
               </div>
             ))}
           </div>
-        </section>}
+        </section>
+        </>}
         {previewOpen && (
           <div className="previewModalBackdrop" onClick={() => setPreviewOpen(false)}>
             <div className="previewModal" onClick={(event) => event.stopPropagation()}>

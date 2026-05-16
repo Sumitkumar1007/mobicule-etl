@@ -761,12 +761,10 @@ textarea {
 
 .smallToggle {
   display: inline-grid;
-  grid-auto-flow: column;
-  grid-template-columns: auto auto;
   align-items: center;
   justify-content: start;
-  gap: 8px;
-  min-width: 106px;
+  width: 48px;
+  min-width: 48px;
   color: #17211c;
   font-size: 12px;
   font-weight: 900;
@@ -778,9 +776,9 @@ textarea {
   height: 24px;
   margin: 0;
   appearance: none;
-  border: 1px solid #cbd6cf;
+  border: 1px solid #dc2626;
   border-radius: 999px;
-  background: #dce4df;
+  background: #dc2626;
   cursor: pointer;
   transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
 }
@@ -799,8 +797,8 @@ textarea {
 }
 
 .smallToggle input:checked {
-  border-color: #1e6bff;
-  background: #1e6bff;
+  border-color: #16a34a;
+  background: #16a34a;
 }
 
 .smallToggle input:checked::before {
@@ -809,7 +807,7 @@ textarea {
 
 .smallToggle input:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(30, 107, 255, 0.18);
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.18);
 }
 
 .stepActions,
@@ -1457,6 +1455,9 @@ body,
 }
 
 .rail {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-height: 100vh;
   background: var(--sidebar);
   border-right: 1px solid var(--line);
   box-shadow: 8px 0 30px rgba(31, 44, 60, 0.04);
@@ -1514,6 +1515,28 @@ nav button.active {
 .workspace {
   padding: 34px 40px;
 }
+.railFooter {
+  padding: 16px 12px 20px;
+  border-top: 1px solid var(--line);
+}
+
+.logoutButton {
+  width: 100%;
+  min-height: 44px;
+  justify-content: center;
+}
+
+.accountSummaryPanel {
+  margin-bottom: 18px;
+}
+
+.accountSummary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
 
 .topbar {
   min-height: 58px;

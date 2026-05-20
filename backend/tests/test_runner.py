@@ -40,7 +40,7 @@ def test_same_connection_sftp_join_config():
     assert result["host"] == "sftp.local"
     assert result["remote_path"] == "/in/loans.csv"
     assert result["format"] == "xlsx"
-    assert result["operation"] == "read"
+    assert "operation" not in result
 
 
 def test_postgres_write_sql_supports_append_and_upsert():

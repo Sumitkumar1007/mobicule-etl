@@ -314,11 +314,10 @@ class TransformationExecutor:
             "tuple": tuple,
             "zip": zip,
         }
-        globals_scope = {"__builtins__": safe_builtins, "pd": pd, "np": np}
-        locals_scope: dict[str, Any] = {"df": df.copy()}
-        exec(code, globals_scope, locals_scope)
-        result = locals_scope.get("result")
-        transform = locals_scope.get("transform")
+        scope: dict[str, Any] = {"__builtins__": safe_builtins, "pd": pd, "np": np, "df": df.copy()}
+        exec(code, scope, scope)
+        result = scope.get("result")
+        transform = scope.get("transform")
         if callable(transform):
             result = transform(df.copy())
         if result is None:

@@ -261,6 +261,31 @@ def test_custom_transform_accepts_df_and_returns_next_step_input():
     assert result == [{"customer_id": "1", "double_amount": 20}, {"customer_id": "2", "double_amount": 40}]
 
 
+def test_custom_transform_can_use_top_level_constants_inside_transform():
+    rows = [{"Apac Number": "A1", "Amount": 10}]
+    result = apply_transforms(
+        rows,
+        [
+            {
+                "id": "custom",
+                "step_type": "custom",
+                "step_name": "Custom Transform",
+                "parameters": {
+                    "code": "\n".join([
+                        "MANDATORY_COLUMNS = ['Apac Number']",
+                        "def transform(df):",
+                        "    missing = [c for c in MANDATORY_COLUMNS if c not in df.columns]",
+                        "    assert not missing",
+                        "    return df.assign(validated=True)",
+                    ])
+                },
+            }
+        ],
+    )
+
+    assert result == [{"Apac Number": "A1", "Amount": 10, "validated": True}]
+
+
 def test_custom_transform_supports_result_variable():
     rows = [{"amount": 10}]
     result = apply_transforms(

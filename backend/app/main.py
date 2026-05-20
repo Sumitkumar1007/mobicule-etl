@@ -20,20 +20,6 @@ configure_logging()
 settings = get_settings()
 
 app = FastAPI(title=settings.app_name, version="0.1.0")
-if settings.force_https:
-    app.add_middleware(HTTPSRedirectMiddleware)
-if settings.allowed_hosts:
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-app.include_router(router, prefix=settings.api_prefix)
-
-
 @app.middleware("http")
 async def authenticate_api(request: Request, call_next):
     if request.method == "OPTIONS" or not request.url.path.startswith(settings.api_prefix):
@@ -47,6 +33,20 @@ async def authenticate_api(request: Request, call_next):
         return JSONResponse({"detail": "Authentication required"}, status_code=401)
     request.state.user = user
     return await call_next(request)
+
+
+if settings.force_https:
+    app.add_middleware(HTTPSRedirectMiddleware)
+if settings.allowed_hosts:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app.include_router(router, prefix=settings.api_prefix)
 
 frontend_dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 if frontend_dist.exists():

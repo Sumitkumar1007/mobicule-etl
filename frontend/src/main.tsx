@@ -304,7 +304,7 @@ function App() {
     const selectedSource = sourceResources.find((item) => item.id === effectiveTransformation?.source_id);
     const selectedDestination = destinationResources.find((item) => item.id === effectiveTransformation?.destination_id);
     if (!effectiveTransformation || !selectedSource || !selectedDestination) {
-      throw new Error("Select a published transformation with datasource and destination");
+      throw new Error("Select a transformation with datasource and destination");
     }
     const payload = {
       name: form.name,
@@ -868,7 +868,11 @@ function App() {
                 setForm({ ...form, transformation_id: event.target.value, transformation_version: "latest", source_id: String(selected?.source_id ?? ""), destination_id: String(selected?.destination_id ?? "") });
               }}>
                 <option value="">Select transformation</option>
-                {transformations.filter((item) => item.status === "published").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                {transformations.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}{item.status === "published" ? "" : " (draft)"}
+                  </option>
+                ))}
               </select>
             </label>
             {form.transformation_id && <label>
@@ -1738,6 +1742,7 @@ const STEP_TYPES: { type: StepType; label: string; description: string }[] = [
   { type: "value_map", label: "Map Column Values", description: "Map values such as yes to 1 and no to 0" },
   { type: "groupby", label: "Group By", description: "Aggregate rows by one or more columns" },
   { type: "pivot", label: "Pivot", description: "Turn values from rows into output columns" },
+  { type: "custom", label: "Custom Transform", description: "Run trusted Python with df, pd, and np" },
   { type: "deduplicate", label: "Remove Duplicates", description: "Drop duplicate rows by subset" },
   { type: "sort", label: "Sort Rows", description: "Order output rows" }
 ];

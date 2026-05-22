@@ -1,4 +1,6 @@
+import logging
 from pathlib import Path
+from time import sleep
 
 from fastapi import Request
 from fastapi import FastAPI
@@ -18,6 +20,7 @@ from app.services.scheduler import start_scheduler, stop_scheduler
 
 configure_logging()
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title=settings.app_name, version="0.1.0")
 @app.middleware("http")
@@ -61,9 +64,29 @@ def serve_frontend(path: str):
     return {"message": "Frontend build not found. Run `npm run build` in frontend."}
 
 
+def _init_db_with_retry(attempts: int = 12, delay_seconds: int = 5) -> None:
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            init_db()
+            return
+        except Exception as exc:
+            last_error = exc
+            if attempt == attempts:
+                break
+            logger.warning(
+                "Metadata database unavailable during startup (attempt %s/%s): %s",
+                attempt,
+                attempts,
+                exc,
+            )
+            sleep(delay_seconds)
+    raise RuntimeError("Metadata database unavailable after startup retries") from last_error
+
+
 @app.on_event("startup")
 def startup() -> None:
-    init_db()
+    _init_db_with_retry()
     start_scheduler()
 
 

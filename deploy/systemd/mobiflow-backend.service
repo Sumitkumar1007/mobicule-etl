@@ -1,6 +1,8 @@
 [Unit]
 Description=MobiFlow ETL Backend
-After=network.target
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -10,7 +12,7 @@ WorkingDirectory=/home/ubuntu/aiml/mobicule-etl/backend
 EnvironmentFile=/home/ubuntu/aiml/mobicule-etl/.env
 ExecStart=/home/ubuntu/aiml/mobicule-etl/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
 Restart=always
-RestartSec=5
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target

@@ -2,7 +2,7 @@ import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from app.core.config import get_settings
 from app.core.security import hash_password
@@ -17,7 +17,10 @@ class PgDb:
         import psycopg
         from psycopg.rows import dict_row
 
-        self.conn = psycopg.connect(url, row_factory=dict_row)
+        connect_kwargs: dict[str, Any] = {}
+        if "connect_timeout" not in parse_qs(urlparse(url).query):
+            connect_kwargs["connect_timeout"] = 5
+        self.conn = psycopg.connect(url, row_factory=dict_row, **connect_kwargs)
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()):
         return self.conn.execute(_pg_sql(sql), params)

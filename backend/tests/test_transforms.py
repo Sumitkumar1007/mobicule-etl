@@ -68,7 +68,7 @@ def test_blank_columns_and_reorder_columns():
                 "id": "blank",
                 "step_type": "blank_columns",
                 "step_name": "Add Blank Columns",
-                "parameters": {"columns": [{"name": "template_empty", "value_type": "empty_string"}, {"name": "template_null", "value_type": "null"}]},
+                "parameters": {"columns": "template_empty, template_null"},
             },
             {
                 "id": "order",
@@ -79,7 +79,7 @@ def test_blank_columns_and_reorder_columns():
         ],
     )
     assert list(result[0].keys()) == ["template_empty", "id", "template_null", "amount"]
-    assert result == [{"template_empty": "", "id": "A1", "template_null": None, "amount": "10"}]
+    assert result == [{"template_empty": "", "id": "A1", "template_null": "", "amount": "10"}]
 
 
 def test_preview_collects_rejected_rows_for_cast_validation_errors_only():

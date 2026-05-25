@@ -1424,19 +1424,20 @@ function StepForm({ step, columns, sourceResources, activeSourceResource, onChan
     </div>;
   }
   if (step.step_type === "blank_columns") {
-    const blankColumns = params.columns as { name: string; value_type: string; value?: string }[] ?? [];
+    const blankColumns = Array.isArray(params.columns)
+      ? (params.columns as Array<string | { name?: string }>).map((item) => typeof item === "string" ? item : item.name ?? "").join(", ")
+      : String(params.columns ?? "");
     return <div className="ruleStack">
-      {blankColumns.map((item, idx) => <div className="ruleRow" key={idx}>
-        <input value={item.name ?? ""} onChange={(event) => setParams({ columns: updateArray(blankColumns, idx, { ...item, name: event.target.value }) })} placeholder="Output column" />
-        <select value={item.value_type ?? "empty_string"} onChange={(event) => setParams({ columns: updateArray(blankColumns, idx, { ...item, value_type: event.target.value }) })}>
-          <option value="empty_string">Empty string</option>
-          <option value="null">Null</option>
-          <option value="custom">Custom value</option>
-        </select>
-        {item.value_type === "custom" && <input value={item.value ?? ""} onChange={(event) => setParams({ columns: updateArray(blankColumns, idx, { ...item, value: event.target.value }) })} placeholder="Value" />}
-        <button className="ghost small" onClick={() => setParams({ columns: blankColumns.filter((_, itemIndex) => itemIndex !== idx) })}>Delete</button>
-      </div>)}
-      <button className="ghost small" onClick={() => setParams({ columns: [...blankColumns, { name: "", value_type: "empty_string" }] })}>Add blank column</button>
+      <label className="editor fullWidth">
+        Column names
+        <textarea
+          className="miniTextarea"
+          value={blankColumns}
+          onChange={(event) => setParams({ columns: event.target.value })}
+          placeholder="COL1, COL2, COL3
+or paste one column per line"
+        />
+      </label>
     </div>;
   }
   if (step.step_type === "value_map") {
@@ -1853,7 +1854,7 @@ function emptyStep(stepType: StepType): TransformationStep {
     cast: { casts: [] },
     fillna: { fills: [] },
     derive: { output_column: "", output_type: "float", left: { kind: "column", value: "" }, operator: "+", right: { kind: "constant", value: "" } },
-    blank_columns: { columns: [{ name: "", value_type: "empty_string" }] },
+    blank_columns: { columns: "" },
     filter: { joiner: "and", conditions: [] },
     value_map: { column: "", output_column: "", output_type: "integer", mappings: [{ from: "yes", to: "1" }, { from: "no", to: "0" }] },
     groupby: { group_columns: [], aggregations: [{ column: "", function: "sum", output_column: "" }] },

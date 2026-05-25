@@ -227,15 +227,24 @@ class TransformationExecutor:
 
     def apply_blank_columns(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
         result = df.copy()
-        for item in params.get("columns", []):
-            name = str(item.get("name") or "").strip()
+        column_items = params.get("columns", [])
+        if isinstance(column_items, str):
+            column_items = _split_column_names(column_items)
+        for item in column_items:
+            if isinstance(item, str):
+                name = item.strip()
+                value_type = "empty_string"
+                value = ""
+            else:
+                name = str(item.get("name") or "").strip()
+                value_type = item.get("value_type", "empty_string")
+                value = item.get("value", "")
             if not name:
                 continue
-            value_type = item.get("value_type", "empty_string")
             if value_type == "null":
                 result[name] = None
             elif value_type == "custom":
-                result[name] = item.get("value", "")
+                result[name] = value
             else:
                 result[name] = ""
         return result
@@ -418,8 +427,11 @@ def validate_transforms(columns: list[str], steps: list[dict[str, Any]], destina
             if params["output_column"] not in current:
                 current.append(params["output_column"])
         elif step_type == "blank_columns":
-            for item in params.get("columns", []):
-                name = str(item.get("name") or "").strip()
+            column_items = params.get("columns", [])
+            if isinstance(column_items, str):
+                column_items = _split_column_names(column_items)
+            for item in column_items:
+                name = item.strip() if isinstance(item, str) else str(item.get("name") or "").strip()
                 if name and name not in current:
                     current.append(name)
         elif step_type == "reorder" and params.get("columns"):
@@ -534,6 +546,10 @@ def _referenced_columns(step: dict[str, Any]) -> set[str]:
     if step["step_type"] == "sort":
         return {params.get("column")} if params.get("column") else set()
     return set()
+
+
+def _split_column_names(value: str) -> list[str]:
+    return [item.strip() for item in value.replace("\n", ",").split(",") if item.strip()]
 
 
 def _invalid_cast_mask(source: pd.Series, converted: pd.Series, target_type: Any) -> pd.Series:

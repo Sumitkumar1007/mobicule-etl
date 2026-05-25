@@ -496,7 +496,7 @@ def _load_pipeline(run_id: int) -> dict[str, Any]:
 
 def _runtime_pipeline_transforms(pipeline: dict[str, Any]) -> list[dict[str, Any]]:
     fallback = decode(pipeline["transforms"])
-    transformation_id = pipeline.get("transformation_id")
+    transformation_id = pipeline.get("transformation_id") or _matching_transformation_id(fallback)
     if not transformation_id:
         return fallback
     version = pipeline.get("transformation_version")
@@ -528,6 +528,34 @@ def _runtime_pipeline_transforms(pipeline: dict[str, Any]) -> list[dict[str, Any
     snapshot = decode(dict(row)["snapshot_data"])
     steps = snapshot.get("steps") if isinstance(snapshot, dict) else None
     return steps if isinstance(steps, list) else fallback
+
+
+def _matching_transformation_id(steps: list[dict[str, Any]]) -> int | None:
+    with db() as conn:
+        version_rows = conn.execute(
+            """
+            SELECT transformation_id, snapshot_data
+            FROM transformation_versions
+            ORDER BY version_no DESC, id DESC
+            """
+        ).fetchall()
+        transformation_rows = conn.execute(
+            """
+            SELECT id, steps
+            FROM transformations
+            ORDER BY id DESC
+            """
+        ).fetchall()
+    for row in version_rows:
+        data = dict(row)
+        snapshot = decode(data["snapshot_data"])
+        if isinstance(snapshot, dict) and snapshot.get("steps") == steps:
+            return int(data["transformation_id"])
+    for row in transformation_rows:
+        data = dict(row)
+        if decode(data["steps"]) == steps:
+            return int(data["id"])
+    return None
 
 
 def _mark_running(run_id: int) -> bool:

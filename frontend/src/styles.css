@@ -434,7 +434,9 @@ h2 {
 }
 
 .reorderList {
-  display: grid;
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -444,10 +446,18 @@ h2 {
   border: 1px solid #d8e3dc;
   border-radius: 8px;
   cursor: grab;
-  display: flex;
-  gap: 10px;
-  min-height: 40px;
-  padding: 8px 12px;
+  display: inline-flex;
+  flex: 0 1 auto;
+  gap: 8px;
+  max-width: 260px;
+  min-height: 36px;
+  padding: 7px 10px;
+}
+
+.reorderItem span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .reorderItem:active {

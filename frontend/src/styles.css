@@ -425,6 +425,14 @@ h2 {
 }
 
 
+
+.ruleToolbar {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
 .reorderList {
   display: grid;
   gap: 8px;

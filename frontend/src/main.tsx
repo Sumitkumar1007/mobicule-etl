@@ -1501,10 +1501,18 @@ or paste one column per line"
   }
   if (step.step_type === "reorder") {
     const selected = params.columns as string[] ?? [];
-    const ordered = selected.length ? [...selected.filter((column) => columns.includes(column)), ...columns.filter((column) => !selected.includes(column))] : columns;
+    const selectedSet = new Set(selected);
+    const selectedValid = selected.filter((column) => columns.includes(column));
+    const missingFromSelection = columns.filter((column) => !selectedSet.has(column));
+    const hasStaleOrder = selected.length > 0 && missingFromSelection.length > 0;
+    const ordered = hasStaleOrder ? columns : selectedValid.length ? [...selectedValid, ...columns.filter((column) => !selectedValid.includes(column))] : columns;
+    const syncColumns = () => setParams({ ...params, columns, include_unlisted: true });
     const moveDraggedColumn = (fromIndex: number, toIndex: number) => setParams({ ...params, columns: moveItem(ordered, fromIndex, toIndex), include_unlisted: true });
     return <div className="ruleStack">
-      <label className="toggle"><input type="checkbox" checked={Boolean(params.include_unlisted ?? true)} onChange={(event) => setParams({ ...params, include_unlisted: event.target.checked })} />Keep unlisted columns after selected</label>
+      <div className="ruleToolbar">
+        <label className="toggle"><input type="checkbox" checked={Boolean(params.include_unlisted ?? true)} onChange={(event) => setParams({ ...params, include_unlisted: event.target.checked })} />Keep unlisted columns after selected</label>
+        <button className="ghost small" onClick={syncColumns}>Sync from previous step</button>
+      </div>
       <div className="reorderList">
         {ordered.map((column, idx) => <div
           className="reorderItem"

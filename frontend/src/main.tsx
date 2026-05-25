@@ -829,12 +829,13 @@ function App() {
                   {isAdmin && <StepTypeSelector onSelect={addStep} />}
                 </div>
                 <div className="stepList">
-                  {transformationDraft.steps.map((step, index) => (
-                    <StepCard
+                  {transformationDraft.steps.map((step, index) => {
+                    const stepColumns = columnsBeforeStep(sourceColumns, transformationDraft.steps, index);
+                    return <StepCard
                       key={step.id}
                       step={step}
                       index={index}
-                      columns={sourceColumns}
+                      columns={stepColumns}
                       sourceResources={sourceResources}
                       activeSourceResource={sourceResources.find((item) => String(item.id) === transformationDraft.source_id)}
                       onChange={(next) => updateStep(step.id, () => next)}
@@ -843,8 +844,8 @@ function App() {
                       onMoveUp={() => moveStep(step.id, -1)}
                       onMoveDown={() => moveStep(step.id, 1)}
                       readOnly={!isAdmin}
-                    />
-                  ))}
+                    />;
+                  })}
                 </div>
               </section>
             </div>
@@ -1500,17 +1501,27 @@ or paste one column per line"
   }
   if (step.step_type === "reorder") {
     const selected = params.columns as string[] ?? [];
-    const available = columns.filter((column) => !selected.includes(column));
+    const ordered = selected.length ? [...selected.filter((column) => columns.includes(column)), ...columns.filter((column) => !selected.includes(column))] : columns;
+    const moveDraggedColumn = (fromIndex: number, toIndex: number) => setParams({ ...params, columns: moveItem(ordered, fromIndex, toIndex), include_unlisted: true });
     return <div className="ruleStack">
-      <label className="fullWidth">Column order<input value={asCsv(selected)} onChange={(event) => setParams({ ...params, columns: csvList(event.target.value) })} placeholder="customer_id, name, amount" /></label>
       <label className="toggle"><input type="checkbox" checked={Boolean(params.include_unlisted ?? true)} onChange={(event) => setParams({ ...params, include_unlisted: event.target.checked })} />Keep unlisted columns after selected</label>
-      <div className="columnChips">{available.map((column) => <button key={column} onClick={() => setParams({ ...params, columns: [...selected, column] })}>{column}</button>)}</div>
-      {selected.map((column, idx) => <div className="ruleRow" key={`${column}-${idx}`}>
-        <span>{idx + 1}. {column}</span>
-        <button className="ghost small" onClick={() => setParams({ ...params, columns: moveArray(selected, idx, -1) })}>↑</button>
-        <button className="ghost small" onClick={() => setParams({ ...params, columns: moveArray(selected, idx, 1) })}>↓</button>
-        <button className="ghost small" onClick={() => setParams({ ...params, columns: selected.filter((_, itemIndex) => itemIndex !== idx) })}>Delete</button>
-      </div>)}
+      <div className="reorderList">
+        {ordered.map((column, idx) => <div
+          className="reorderItem"
+          draggable
+          key={`${column}-${idx}`}
+          onDragStart={(event) => event.dataTransfer.setData("text/plain", String(idx))}
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => {
+            event.preventDefault();
+            const fromIndex = Number(event.dataTransfer.getData("text/plain"));
+            if (!Number.isNaN(fromIndex)) moveDraggedColumn(fromIndex, idx);
+          }}
+        >
+          <span className="dragHandle">☰</span>
+          <span>{idx + 1}. {column}</span>
+        </div>)}
+      </div>
     </div>;
   }
   return <div className="ruleRow"><ColumnSelect value={String(params.column ?? "")} columns={columns} onChange={(value) => setParams({ ...params, column: value })} /><label>Ascending<select value={String(params.ascending ?? true)} onChange={(event) => setParams({ ...params, ascending: event.target.value === "true" })}><option value="true">Ascending</option><option value="false">Descending</option></select></label></div>;
@@ -1927,6 +1938,67 @@ function flattenKeys(value: unknown, keys: Record<string, true> = {}) {
   return keys;
 }
 
+function columnsBeforeStep(sourceColumns: string[], steps: TransformationStep[], stepIndex: number) {
+  return steps.slice(0, stepIndex).reduce((current, step) => columnsAfterStep(current, step), sourceColumns);
+}
+
+function columnsAfterStep(current: string[], step: TransformationStep) {
+  if (!step.is_enabled) return current;
+  const params = step.parameters;
+  if (step.step_type === "select" && Array.isArray(params.columns) && params.columns.length) {
+    return (params.columns as string[]).filter((column) => current.includes(column));
+  }
+  if (step.step_type === "rename") {
+    const mappings = params.mappings as { source?: string; target?: string }[] ?? [];
+    const bySource = new Map<string, string>();
+    mappings.forEach((item) => {
+      if (item.source && item.target) bySource.set(item.source, item.target);
+    });
+    return current.map((column) => bySource.get(column) ?? column);
+  }
+  if (step.step_type === "join") {
+    return appendMissing(current, params.right_columns as string[] ?? []);
+  }
+  if (step.step_type === "derive" && params.output_column) {
+    return appendMissing(current, [String(params.output_column)]);
+  }
+  if (step.step_type === "blank_columns") {
+    return appendMissing(current, blankColumnNames(params.columns));
+  }
+  if (step.step_type === "value_map" && params.output_column) {
+    return appendMissing(current, [String(params.output_column)]);
+  }
+  if (step.step_type === "groupby" && Array.isArray(params.group_columns)) {
+    const aggregations = params.aggregations as { column?: string; function?: string; output_column?: string }[] ?? [];
+    return [
+      ...(params.group_columns as string[]),
+      ...aggregations.filter((item) => item.column && item.function).map((item) => item.output_column || `${item.column}_${item.function}`)
+    ];
+  }
+  if (step.step_type === "pivot" && Array.isArray(params.index_columns)) {
+    return params.index_columns as string[];
+  }
+  if (step.step_type === "custom" && Array.isArray(params.output_columns) && params.output_columns.length) {
+    return params.output_columns as string[];
+  }
+  if (step.step_type === "reorder" && Array.isArray(params.columns) && params.columns.length) {
+    const selected = (params.columns as string[]).filter((column) => current.includes(column));
+    const remaining = params.include_unlisted === false ? [] : current.filter((column) => !selected.includes(column));
+    return [...selected, ...remaining];
+  }
+  return current;
+}
+
+function appendMissing(current: string[], additions: string[]) {
+  return [...current, ...additions.filter((column) => column && !current.includes(column))];
+}
+
+function blankColumnNames(value: unknown) {
+  if (typeof value === "string") return csvList(value.replace(/\n/g, ","));
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => typeof item === "string" ? item : String((item as { name?: unknown }).name ?? "")).filter(Boolean);
+}
+
 function updateArray<T>(rows: T[], index: number, value: T) {
   return rows.map((row, rowIndex) => rowIndex === index ? value : row);
 }
@@ -1936,6 +2008,14 @@ function moveArray<T>(rows: T[], index: number, direction: -1 | 1) {
   if (target < 0 || target >= rows.length) return rows;
   const next = [...rows];
   [next[index], next[target]] = [next[target], next[index]];
+  return next;
+}
+
+function moveItem<T>(rows: T[], fromIndex: number, toIndex: number) {
+  if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= rows.length || toIndex >= rows.length) return rows;
+  const next = [...rows];
+  const [item] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, item);
   return next;
 }
 

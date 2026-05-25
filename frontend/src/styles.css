@@ -424,6 +424,33 @@ h2 {
   font-weight: 800;
 }
 
+
+.reorderList {
+  display: grid;
+  gap: 8px;
+}
+
+.reorderItem {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #d8e3dc;
+  border-radius: 8px;
+  cursor: grab;
+  display: flex;
+  gap: 10px;
+  min-height: 40px;
+  padding: 8px 12px;
+}
+
+.reorderItem:active {
+  cursor: grabbing;
+}
+
+.dragHandle {
+  color: #64776c;
+  font-weight: 900;
+}
+
 .formGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

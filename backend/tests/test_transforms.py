@@ -59,6 +59,44 @@ def test_cast_date_with_output_format():
     assert result == [{"notice_date": "25/05/26"}, {"notice_date": "26/05/26"}]
 
 
+def test_blank_columns_and_reorder_columns():
+    rows = [{"id": "A1", "amount": "10"}]
+    result = apply_transforms(
+        rows,
+        [
+            {
+                "id": "blank",
+                "step_type": "blank_columns",
+                "step_name": "Add Blank Columns",
+                "parameters": {"columns": [{"name": "template_empty", "value_type": "empty_string"}, {"name": "template_null", "value_type": "null"}]},
+            },
+            {
+                "id": "order",
+                "step_type": "reorder",
+                "step_name": "Reorder Columns",
+                "parameters": {"columns": ["template_empty", "id", "template_null"], "include_unlisted": True},
+            },
+        ],
+    )
+    assert list(result[0].keys()) == ["template_empty", "id", "template_null", "amount"]
+    assert result == [{"template_empty": "", "id": "A1", "template_null": None, "amount": "10"}]
+
+
+def test_preview_collects_rejected_filter_and_duplicate_rows():
+    from app.services.transforms import preview_transforms
+
+    rows = [{"id": "1", "amount": "10"}, {"id": "2", "amount": "0"}, {"id": "1", "amount": "10"}]
+    result = preview_transforms(
+        rows,
+        [
+            {"id": "filter", "step_type": "filter", "step_name": "Filter Rows", "parameters": {"conditions": [{"column": "amount", "operator": "greater_than", "value": "0"}]}},
+            {"id": "dedupe", "step_type": "deduplicate", "step_name": "Remove Duplicates", "parameters": {"columns": ["id"], "keep": "first"}},
+        ],
+    )
+    assert result.rows == [{"id": "1", "amount": "10"}]
+    assert [row["_rejected_reason"] for row in result.rejected_rows] == ["Filter condition not matched", "Duplicate row removed"]
+
+
 def test_filter_like_and_not_like():
     rows = [
         {"id": 1, "name": "Ada Lovelace"},

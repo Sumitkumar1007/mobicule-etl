@@ -15,13 +15,15 @@ STEP_ORDER = {
     "cast": 4,
     "fillna": 5,
     "derive": 6,
-    "filter": 7,
-    "value_map": 8,
-    "groupby": 9,
-    "pivot": 10,
-    "custom": 11,
-    "deduplicate": 12,
-    "sort": 13,
+    "blank_columns": 7,
+    "filter": 8,
+    "value_map": 9,
+    "groupby": 10,
+    "pivot": 11,
+    "custom": 12,
+    "deduplicate": 13,
+    "reorder": 14,
+    "sort": 15,
 }
 
 
@@ -41,6 +43,7 @@ class TransformResult:
     logs: list[StepLog] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     changed_columns: dict[str, list[str]] = field(default_factory=dict)
+    rejected_rows: list[dict[str, Any]] = field(default_factory=list)
 
 
 class TransformationExecutor:
@@ -49,11 +52,13 @@ class TransformationExecutor:
         input_columns = list(df.columns)
         logs: list[StepLog] = []
         warnings: list[str] = []
+        rejected_rows: list[dict[str, Any]] = []
         for index, step in enumerate(steps, start=1):
             normalized = normalize_step(step, index)
             if not normalized.get("is_enabled", True):
                 logs.append(StepLog("INFO", f"Step {index} {normalized['step_name']} skipped", len(df), len(df), 0, normalized["id"]))
                 continue
+            before_df = df.copy()
             before = len(df)
             start = perf_counter()
             try:
@@ -61,6 +66,7 @@ class TransformationExecutor:
             except Exception as exc:
                 raise ValueError(f"Step {index} {normalized['step_name']} failed: {exc}") from exc
             duration_ms = int((perf_counter() - start) * 1000)
+            rejected_rows.extend(_rejected_records(before_df, df, normalized))
             logs.append(
                 StepLog(
                     "INFO",
@@ -73,6 +79,7 @@ class TransformationExecutor:
             )
             warnings.extend(validate_step_order(normalized, steps[: index - 1]))
         records = df.where(pd.notnull(df), None).to_dict(orient="records")
+        rejected_records = pd.DataFrame(rejected_rows).where(pd.notnull(pd.DataFrame(rejected_rows)), None).to_dict(orient="records") if rejected_rows else []
         output_columns = list(df.columns)
         return TransformResult(
             rows=records,
@@ -83,6 +90,7 @@ class TransformationExecutor:
                 "removed": [col for col in input_columns if col not in output_columns],
                 "kept": [col for col in output_columns if col in input_columns],
             },
+            rejected_rows=rejected_records,
         )
 
     def apply_step(self, df: pd.DataFrame, step: dict[str, Any]) -> pd.DataFrame:
@@ -100,6 +108,8 @@ class TransformationExecutor:
             return self.apply_fillna(df, params)
         if step_type == "derive":
             return self.apply_derive(df, params)
+        if step_type == "blank_columns":
+            return self.apply_blank_columns(df, params)
         if step_type == "filter":
             return self.apply_filter(df, params)
         if step_type == "value_map":
@@ -112,6 +122,8 @@ class TransformationExecutor:
             return self.apply_custom(df, params)
         if step_type == "deduplicate":
             return self.apply_deduplicate(df, params)
+        if step_type == "reorder":
+            return self.apply_reorder(df, params)
         if step_type == "sort":
             return self.apply_sort(df, params)
         raise ValueError(f"Unsupported step type: {step_type}")
@@ -203,6 +215,21 @@ class TransformationExecutor:
         output_type = params.get("output_type")
         if output_type:
             result[output_column] = _cast_series(result[output_column], output_type)
+        return result
+
+    def apply_blank_columns(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
+        result = df.copy()
+        for item in params.get("columns", []):
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            value_type = item.get("value_type", "empty_string")
+            if value_type == "null":
+                result[name] = None
+            elif value_type == "custom":
+                result[name] = item.get("value", "")
+            else:
+                result[name] = ""
         return result
 
     def apply_filter(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
@@ -332,11 +359,37 @@ class TransformationExecutor:
         keep = params.get("keep", "first")
         return df.drop_duplicates(subset=subset or None, keep=keep)
 
+    def apply_reorder(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
+        selected = [col for col in params.get("columns", []) if col in df.columns]
+        include_unlisted = params.get("include_unlisted", True)
+        remaining = [col for col in df.columns if col not in selected] if include_unlisted else []
+        ordered = [*selected, *remaining]
+        return df.loc[:, ordered].copy() if ordered else df.copy()
+
     def apply_sort(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
         column = params.get("column")
         if column not in df.columns:
             raise ValueError(f"Unknown column {column}")
         return df.sort_values(by=column, ascending=bool(params.get("ascending", True)))
+
+
+def _rejected_records(before_df: pd.DataFrame, after_df: pd.DataFrame, step: dict[str, Any]) -> list[dict[str, Any]]:
+    if step["step_type"] not in {"filter", "deduplicate"} or before_df.empty:
+        return []
+    rejected = before_df.loc[~before_df.index.isin(after_df.index)].copy()
+    if rejected.empty:
+        return []
+    rejected["_rejected_step"] = step["step_name"]
+    rejected["_rejected_reason"] = _rejection_reason(step)
+    return rejected.where(pd.notnull(rejected), None).to_dict(orient="records")
+
+
+def _rejection_reason(step: dict[str, Any]) -> str:
+    if step["step_type"] == "filter":
+        return "Filter condition not matched"
+    if step["step_type"] == "deduplicate":
+        return "Duplicate row removed"
+    return "Rejected by transformation"
 
 
 def apply_transforms(rows: list[dict[str, Any]], transforms: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -374,6 +427,15 @@ def validate_transforms(columns: list[str], steps: list[dict[str, Any]], destina
         elif step_type == "derive" and params.get("output_column"):
             if params["output_column"] not in current:
                 current.append(params["output_column"])
+        elif step_type == "blank_columns":
+            for item in params.get("columns", []):
+                name = str(item.get("name") or "").strip()
+                if name and name not in current:
+                    current.append(name)
+        elif step_type == "reorder" and params.get("columns"):
+            selected = [col for col in params.get("columns", []) if col in current]
+            remaining = [col for col in current if col not in selected] if params.get("include_unlisted", True) else []
+            current = [*selected, *remaining]
         elif step_type == "value_map" and params.get("output_column"):
             if params["output_column"] not in current:
                 current.append(params["output_column"])
@@ -424,12 +486,14 @@ def human_step_name(step_type: str) -> str:
         "cast": "Change Data Type",
         "fillna": "Fill Null Values",
         "derive": "Add Derived Column",
+        "blank_columns": "Add Blank Columns",
         "filter": "Filter Rows",
         "value_map": "Map Column Values",
         "groupby": "Group By",
         "pivot": "Pivot",
         "custom": "Custom Transform",
         "deduplicate": "Remove Duplicates",
+        "reorder": "Reorder Columns",
         "sort": "Sort Rows",
     }.get(step_type, step_type.title())
 
@@ -465,6 +529,8 @@ def _referenced_columns(step: dict[str, Any]) -> set[str]:
         return {operand.get("value") for operand in (params.get("left", {}), params.get("right", {})) if operand.get("kind") == "column"}
     if step["step_type"] == "filter":
         return {item.get("column") for item in params.get("conditions", []) if item.get("column")}
+    if step["step_type"] == "reorder":
+        return {column for column in params.get("columns", []) if column}
     if step["step_type"] == "value_map":
         return {params.get("column")} if params.get("column") else set()
     if step["step_type"] == "groupby":

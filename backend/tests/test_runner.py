@@ -83,3 +83,18 @@ def test_validate_source_query_blocks_multiple_statements():
         assert "single read-only statement" in str(exc)
     else:
         raise AssertionError("Expected multiple statements to fail")
+
+
+def test_rejected_output_path_adds_datetime_before_extension(monkeypatch):
+    from datetime import UTC, datetime
+
+    from app.services import runner
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 5, 25, 6, 30, 5, tzinfo=UTC)
+
+    monkeypatch.setattr(runner, "datetime", FixedDateTime)
+
+    assert runner._rejected_output_path("/out/final.csv") == "/out/final_rejected_20260525063005.csv"

@@ -54,6 +54,9 @@ def run_pipeline(run_id: int) -> None:
         result = preview_transforms(rows, prepare_runtime_transforms(pipeline["transforms"], pipeline["source_key"], pipeline["source_config"]))
         _ensure_running(run_id)
         rows = result.rows
+        rejected_path = save_rejected_records(pipeline["destination_key"], pipeline["destination_config"], result.rejected_rows)
+        if rejected_path:
+            _log(run_id, "WARNING", f"Rejected records saved: {rejected_path} ({len(result.rejected_rows)} rows)")
         for step_log in result.logs:
             _log(run_id, step_log.level, step_log.message)
             _transformation_log(run_id, step_log)
@@ -165,6 +168,22 @@ def _extract_sftp(config: dict[str, Any]) -> list[dict[str, Any]]:
         transport.close()
 
 
+def save_rejected_records(destination_key: str, config: dict[str, Any], rows: list[dict[str, Any]]) -> str | None:
+    if not rows:
+        return None
+    if destination_key == "sftp_destination":
+        remote_path = _rejected_output_path(_sftp_write_path(config))
+        _write_sftp_rows(config, remote_path, rows)
+        return remote_path
+    if destination_key in {"csv_output", "jsonl_file"}:
+        output_path = Path(config.get("path", "data/output.csv"))
+        rejected_path = Path(_rejected_output_path(str(output_path)))
+        rejected_path.parent.mkdir(parents=True, exist_ok=True)
+        rejected_path.write_bytes(_rows_payload(str(rejected_path), rows))
+        return str(rejected_path)
+    return None
+
+
 def load(destination_key: str, config: dict[str, Any], rows: list[dict[str, Any]]) -> int:
     connector = get_connector(destination_key)
     if connector.type != "destination":
@@ -264,6 +283,21 @@ def _load_sftp(config: dict[str, Any], rows: list[dict[str, Any]]) -> int:
             writer.writeheader()
             writer.writerows(rows)
         payload = output.getvalue()
+    _write_sftp_payload(config, remote_path, payload)
+    return len(rows)
+
+
+def _write_sftp_rows(config: dict[str, Any], remote_path: str, rows: list[dict[str, Any]]) -> None:
+    _write_sftp_payload(config, remote_path, _rows_payload(remote_path, rows))
+
+
+def _write_sftp_payload(config: dict[str, Any], remote_path: str, payload: str | bytes) -> None:
+    try:
+        import io
+
+        import paramiko
+    except ImportError as exc:
+        raise RuntimeError("paramiko is required for SFTP destination. Install backend requirements.") from exc
     password = config.get("password") or None
     private_key = config.get("private_key") or None
     pkey = paramiko.RSAKey.from_private_key(io.StringIO(private_key)) if private_key else None
@@ -275,7 +309,19 @@ def _load_sftp(config: dict[str, Any], rows: list[dict[str, Any]]) -> int:
             handle.write(payload)
     finally:
         transport.close()
-    return len(rows)
+
+
+def _rows_payload(path: str, rows: list[dict[str, Any]]) -> bytes:
+    if path.endswith(".xlsx"):
+        payload = _xlsx_from_rows(rows)
+        return payload if isinstance(payload, bytes) else payload.encode("utf-8")
+    import io
+
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=list(rows[0].keys()))
+    writer.writeheader()
+    writer.writerows(rows)
+    return output.getvalue().encode("utf-8")
 
 
 def prepare_runtime_transforms(transforms: list[dict[str, Any]], base_source_key: str | None = None, base_source_config: dict[str, Any] | None = None) -> list[dict[str, Any]]:
@@ -369,6 +415,14 @@ def _sftp_write_path(config: dict[str, Any]) -> str:
         default_name = "output.xlsx" if config.get("format") == "xlsx" else "output.csv"
         return posixpath.join(remote_path, default_name)
     return remote_path
+
+
+def _rejected_output_path(output_path: str) -> str:
+    timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+    if "." in posixpath.basename(output_path):
+        stem, ext = posixpath.splitext(output_path)
+        return f"{stem}_rejected_{timestamp}{ext}"
+    return posixpath.join(output_path, f"rejected_{timestamp}.csv")
 
 
 def _format_path_pattern(pattern: str) -> str:

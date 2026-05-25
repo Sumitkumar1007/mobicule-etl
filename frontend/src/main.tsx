@@ -83,7 +83,7 @@ type User = {
 };
 type AuthSession = { token: string; user: User };
 
-type StepType = "select" | "rename" | "cast" | "fillna" | "derive" | "filter" | "deduplicate" | "sort" | "join" | "groupby" | "pivot" | "value_map" | "custom";
+type StepType = "select" | "rename" | "cast" | "fillna" | "derive" | "blank_columns" | "filter" | "deduplicate" | "reorder" | "sort" | "join" | "groupby" | "pivot" | "value_map" | "custom";
 type Operand = { kind: "column" | "constant"; value: string };
 type TransformationStep = {
   id: string;
@@ -522,6 +522,22 @@ function App() {
     setPreviewStepId("");
   }
 
+  function duplicateTransformationDraft() {
+    setActiveTransformationId(null);
+    setTransformationDraft((current) => ({
+      ...current,
+      name: `${current.name || "Transformation"} copy`,
+      status: "draft",
+      version: 1,
+      steps: current.steps.map((step) => ({ ...step, id: makeId(), step_name: step.step_name }))
+    }));
+    setPreviewData(null);
+    setValidationData(null);
+    setPreviewOpen(false);
+    setPreviewStepId("");
+    setToast({ tone: "ok", text: "Transformation copied as new draft" });
+  }
+
   function updateStep(stepId: string, updater: (step: TransformationStep) => TransformationStep) {
     setTransformationDraft((current) => ({
       ...current,
@@ -741,6 +757,7 @@ function App() {
               <div className="actions tight">
                 <button className="ghost" onClick={() => previewTransformation().catch(showError)}>Preview</button>
                 <button className="ghost" onClick={() => validateTransformationDraft().catch(showError)}>Validate</button>
+                {isAdmin && activeTransformationId && <button className="ghost" onClick={duplicateTransformationDraft}>Duplicate</button>}
                 {isAdmin && <button className="ghost" onClick={() => saveTransformationDraft().catch(showError)}>Save Draft</button>}
                 {isAdmin && <button className="primary" onClick={() => publishTransformationDraft().catch(showError)}>Publish</button>}
               </div>
@@ -1406,6 +1423,22 @@ function StepForm({ step, columns, sourceResources, activeSourceResource, onChan
       <label>Keep<select value={String(params.keep ?? "first")} onChange={(event) => setParams({ ...params, keep: event.target.value })}><option value="first">First</option><option value="last">Last</option></select></label>
     </div>;
   }
+  if (step.step_type === "blank_columns") {
+    const blankColumns = params.columns as { name: string; value_type: string; value?: string }[] ?? [];
+    return <div className="ruleStack">
+      {blankColumns.map((item, idx) => <div className="ruleRow" key={idx}>
+        <input value={item.name ?? ""} onChange={(event) => setParams({ columns: updateArray(blankColumns, idx, { ...item, name: event.target.value }) })} placeholder="Output column" />
+        <select value={item.value_type ?? "empty_string"} onChange={(event) => setParams({ columns: updateArray(blankColumns, idx, { ...item, value_type: event.target.value }) })}>
+          <option value="empty_string">Empty string</option>
+          <option value="null">Null</option>
+          <option value="custom">Custom value</option>
+        </select>
+        {item.value_type === "custom" && <input value={item.value ?? ""} onChange={(event) => setParams({ columns: updateArray(blankColumns, idx, { ...item, value: event.target.value }) })} placeholder="Value" />}
+        <button className="ghost small" onClick={() => setParams({ columns: blankColumns.filter((_, itemIndex) => itemIndex !== idx) })}>Delete</button>
+      </div>)}
+      <button className="ghost small" onClick={() => setParams({ columns: [...blankColumns, { name: "", value_type: "empty_string" }] })}>Add blank column</button>
+    </div>;
+  }
   if (step.step_type === "value_map") {
     const mappings = params.mappings as { from: string; to: string }[] ?? [];
     return <div className="ruleStack">
@@ -1462,6 +1495,21 @@ function StepForm({ step, columns, sourceResources, activeSourceResource, onChan
           placeholder={"def transform(df):\n    next_df = df.copy()\n    next_df['new_column'] = next_df['amount'] * 2\n    return next_df"}
         />
       </label>
+    </div>;
+  }
+  if (step.step_type === "reorder") {
+    const selected = params.columns as string[] ?? [];
+    const available = columns.filter((column) => !selected.includes(column));
+    return <div className="ruleStack">
+      <label className="fullWidth">Column order<input value={asCsv(selected)} onChange={(event) => setParams({ ...params, columns: csvList(event.target.value) })} placeholder="customer_id, name, amount" /></label>
+      <label className="toggle"><input type="checkbox" checked={Boolean(params.include_unlisted ?? true)} onChange={(event) => setParams({ ...params, include_unlisted: event.target.checked })} />Keep unlisted columns after selected</label>
+      <div className="columnChips">{available.map((column) => <button key={column} onClick={() => setParams({ ...params, columns: [...selected, column] })}>{column}</button>)}</div>
+      {selected.map((column, idx) => <div className="ruleRow" key={`${column}-${idx}`}>
+        <span>{idx + 1}. {column}</span>
+        <button className="ghost small" onClick={() => setParams({ ...params, columns: moveArray(selected, idx, -1) })}>↑</button>
+        <button className="ghost small" onClick={() => setParams({ ...params, columns: moveArray(selected, idx, 1) })}>↓</button>
+        <button className="ghost small" onClick={() => setParams({ ...params, columns: selected.filter((_, itemIndex) => itemIndex !== idx) })}>Delete</button>
+      </div>)}
     </div>;
   }
   return <div className="ruleRow"><ColumnSelect value={String(params.column ?? "")} columns={columns} onChange={(value) => setParams({ ...params, column: value })} /><label>Ascending<select value={String(params.ascending ?? true)} onChange={(event) => setParams({ ...params, ascending: event.target.value === "true" })}><option value="true">Ascending</option><option value="false">Descending</option></select></label></div>;
@@ -1741,12 +1789,14 @@ const STEP_TYPES: { type: StepType; label: string; description: string }[] = [
   { type: "cast", label: "Change Data Type", description: "Convert string, integer, float, date, datetime" },
   { type: "fillna", label: "Fill Null Values", description: "Fixed values, empty string, zero, forward/back fill" },
   { type: "derive", label: "Add Derived Column", description: "Create column with controlled formula builder" },
+  { type: "blank_columns", label: "Add Blank Columns", description: "Create required output columns as blank/null/custom" },
   { type: "filter", label: "Filter Rows", description: "Build AND/OR conditions visually" },
   { type: "value_map", label: "Map Column Values", description: "Map values such as yes to 1 and no to 0" },
   { type: "groupby", label: "Group By", description: "Aggregate rows by one or more columns" },
   { type: "pivot", label: "Pivot", description: "Turn values from rows into output columns" },
   { type: "custom", label: "Custom Transform", description: "Run trusted Python with df, pd, and np" },
   { type: "deduplicate", label: "Remove Duplicates", description: "Drop duplicate rows by subset" },
+  { type: "reorder", label: "Reorder Columns", description: "Control final output column order" },
   { type: "sort", label: "Sort Rows", description: "Order output rows" }
 ];
 
@@ -1803,12 +1853,14 @@ function emptyStep(stepType: StepType): TransformationStep {
     cast: { casts: [] },
     fillna: { fills: [] },
     derive: { output_column: "", output_type: "float", left: { kind: "column", value: "" }, operator: "+", right: { kind: "constant", value: "" } },
+    blank_columns: { columns: [{ name: "", value_type: "empty_string" }] },
     filter: { joiner: "and", conditions: [] },
     value_map: { column: "", output_column: "", output_type: "integer", mappings: [{ from: "yes", to: "1" }, { from: "no", to: "0" }] },
     groupby: { group_columns: [], aggregations: [{ column: "", function: "sum", output_column: "" }] },
     pivot: { index_columns: [], pivot_column: "", value_column: "", aggfunc: "sum", fill_value: 0 },
     custom: { output_columns: [], code: "def transform(df):\n    next_df = df.copy()\n    return next_df" },
     deduplicate: { columns: [], keep: "first" },
+    reorder: { columns: [], include_unlisted: true },
     sort: { column: "", ascending: true }
   }[stepType] as Record<string, unknown>;
   return {
@@ -1876,6 +1928,14 @@ function flattenKeys(value: unknown, keys: Record<string, true> = {}) {
 
 function updateArray<T>(rows: T[], index: number, value: T) {
   return rows.map((row, rowIndex) => rowIndex === index ? value : row);
+}
+
+function moveArray<T>(rows: T[], index: number, direction: -1 | 1) {
+  const target = index + direction;
+  if (target < 0 || target >= rows.length) return rows;
+  const next = [...rows];
+  [next[index], next[target]] = [next[target], next[index]];
+  return next;
 }
 
 function csvList(value: string) {

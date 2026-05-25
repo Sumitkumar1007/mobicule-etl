@@ -57,6 +57,8 @@ class PipelineCreate(BaseModel):
     source_config: dict[str, Any] = Field(default_factory=dict)
     destination_config: dict[str, Any] = Field(default_factory=dict)
     transforms: list[dict[str, Any]] = Field(default_factory=list)
+    transformation_id: int | None = None
+    transformation_version: int | None = None
     schedule: str | None = None
 
 
@@ -69,6 +71,8 @@ class PipelineUpdate(BaseModel):
     source_config: dict[str, Any] | None = None
     destination_config: dict[str, Any] | None = None
     transforms: list[dict[str, Any]] | None = None
+    transformation_id: int | None = None
+    transformation_version: int | None = None
     schedule: str | None = None
     enabled: bool | None = None
 

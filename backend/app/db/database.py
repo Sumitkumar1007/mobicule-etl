@@ -73,6 +73,8 @@ def init_db() -> None:
                 source_config TEXT NOT NULL,
                 destination_config TEXT NOT NULL,
                 transforms TEXT NOT NULL,
+                transformation_id INTEGER,
+                transformation_version INTEGER,
                 schedule TEXT,
                 enabled INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -182,6 +184,8 @@ def init_db() -> None:
         conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT")
         conn.execute("ALTER TABLE pipelines ADD COLUMN IF NOT EXISTS source_id INTEGER REFERENCES resources(id) ON DELETE SET NULL")
         conn.execute("ALTER TABLE pipelines ADD COLUMN IF NOT EXISTS destination_id INTEGER REFERENCES resources(id) ON DELETE SET NULL")
+        conn.execute("ALTER TABLE pipelines ADD COLUMN IF NOT EXISTS transformation_id INTEGER REFERENCES transformations(id) ON DELETE SET NULL")
+        conn.execute("ALTER TABLE pipelines ADD COLUMN IF NOT EXISTS transformation_version INTEGER")
         conn.execute("ALTER TABLE transformations ADD COLUMN IF NOT EXISTS source_config TEXT NOT NULL DEFAULT '{}'")
         conn.execute("ALTER TABLE transformations ADD COLUMN IF NOT EXISTS destination_config TEXT NOT NULL DEFAULT '{}'")
         settings = get_settings()

@@ -490,8 +490,44 @@ def _load_pipeline(run_id: int) -> dict[str, Any]:
     data = dict(row)
     data["source_config"] = decode(data["source_config"])
     data["destination_config"] = decode(data["destination_config"])
-    data["transforms"] = decode(data["transforms"])
+    data["transforms"] = _runtime_pipeline_transforms(data)
     return data
+
+
+def _runtime_pipeline_transforms(pipeline: dict[str, Any]) -> list[dict[str, Any]]:
+    fallback = decode(pipeline["transforms"])
+    transformation_id = pipeline.get("transformation_id")
+    if not transformation_id:
+        return fallback
+    version = pipeline.get("transformation_version")
+    with db() as conn:
+        if version:
+            row = conn.execute(
+                """
+                SELECT snapshot_data
+                FROM transformation_versions
+                WHERE transformation_id=? AND version_no=?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (transformation_id, version),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT snapshot_data
+                FROM transformation_versions
+                WHERE transformation_id=?
+                ORDER BY version_no DESC, id DESC
+                LIMIT 1
+                """,
+                (transformation_id,),
+            ).fetchone()
+    if row is None:
+        return fallback
+    snapshot = decode(dict(row)["snapshot_data"])
+    steps = snapshot.get("steps") if isinstance(snapshot, dict) else None
+    return steps if isinstance(steps, list) else fallback
 
 
 def _mark_running(run_id: int) -> bool:

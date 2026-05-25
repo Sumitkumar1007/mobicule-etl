@@ -184,8 +184,8 @@ def create_pipeline(payload: PipelineCreate, request: Request) -> Pipeline:
         row = conn.execute(
             """
             INSERT INTO pipelines
-            (name, source_id, destination_id, source_key, destination_key, source_config, destination_config, transforms, schedule)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (name, source_id, destination_id, source_key, destination_key, source_config, destination_config, transforms, transformation_id, transformation_version, schedule)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING *
             """,
             (
@@ -197,6 +197,8 @@ def create_pipeline(payload: PipelineCreate, request: Request) -> Pipeline:
                 encode(payload.source_config),
                 encode(payload.destination_config),
                 encode(payload.transforms),
+                payload.transformation_id,
+                payload.transformation_version,
                 payload.schedule,
             ),
         ).fetchone()
@@ -217,7 +219,7 @@ def update_pipeline(pipeline_id: int, payload: PipelineUpdate, request: Request)
             """
             UPDATE pipelines
             SET name=?, source_id=?, destination_id=?, source_key=?, destination_key=?, source_config=?, destination_config=?,
-                transforms=?, schedule=?, enabled=?, updated_at=CURRENT_TIMESTAMP
+                transforms=?, transformation_id=?, transformation_version=?, schedule=?, enabled=?, updated_at=CURRENT_TIMESTAMP
             WHERE id=?
             RETURNING *
             """,
@@ -230,6 +232,8 @@ def update_pipeline(pipeline_id: int, payload: PipelineUpdate, request: Request)
                 encode(data["source_config"]),
                 encode(data["destination_config"]),
                 encode(data["transforms"]),
+                data.get("transformation_id"),
+                data.get("transformation_version"),
                 data["schedule"],
                 1 if data["enabled"] else 0,
                 pipeline_id,

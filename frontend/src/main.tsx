@@ -33,6 +33,8 @@ type Pipeline = {
   source_config: Record<string, unknown>;
   destination_config: Record<string, unknown>;
   transforms: Record<string, unknown>[];
+  transformation_id?: number | null;
+  transformation_version?: number | null;
   schedule?: string | null;
   enabled: boolean;
   created_at: string;
@@ -315,6 +317,8 @@ function App() {
       source_config: { ...selectedSource.config, ...(effectiveTransformation?.source_config ?? {}) },
       destination_config: { ...selectedDestination.config, ...(effectiveTransformation?.destination_config ?? {}) },
       transforms: selectedVersion ? stepsFromVersion(selectedVersion) : selectedTransformation?.steps ?? [],
+      transformation_id: Number(form.transformation_id),
+      transformation_version: selectedVersion ? selectedVersion.version_no : null,
       schedule: form.schedule
     };
     await api<Pipeline>(editingPipelineId ? `/pipelines/${editingPipelineId}` : "/pipelines", {
@@ -934,8 +938,8 @@ function App() {
                       name: pipeline.name,
                       source_id: String(findResourceId(sourceResources, pipeline.source_key, pipeline.source_config, pipeline.source_id) ?? ""),
                       destination_id: String(findResourceId(destinationResources, pipeline.destination_key, pipeline.destination_config, pipeline.destination_id) ?? ""),
-                      transformation_id: String(findTransformationId(transformations, pipeline.transforms) ?? ""),
-                      transformation_version: String(findTransformationVersion(transformationVersions, pipeline.transforms) ?? "latest"),
+                      transformation_id: String(pipeline.transformation_id ?? findTransformationId(transformations, pipeline.transforms) ?? ""),
+                      transformation_version: pipeline.transformation_version ? String(pipeline.transformation_version) : String(findTransformationVersion(transformationVersions, pipeline.transforms) ?? "latest"),
                       source_key: pipeline.source_key,
                       destination_key: pipeline.destination_key,
                       source_config: JSON.stringify(pipeline.source_config, null, 2),

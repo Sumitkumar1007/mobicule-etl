@@ -1324,13 +1324,16 @@ function StepForm({ step, columns, sourceResources, activeSourceResource, onChan
     return <RuleTable columns={columns} rows={mappings} labels={["Source column", "New column name"]} onAdd={() => setParams({ mappings: [...mappings, { source: "", target: "" }] })} onChange={(rows) => setParams({ mappings: rows })} />;
   }
   if (step.step_type === "cast") {
-    const casts = params.casts as { column: string; type: string }[] ?? [];
+    const casts = params.casts as { column: string; type: string; format?: string }[] ?? [];
     return <div className="ruleStack">{casts.map((item, idx) => (
       <div className="ruleRow" key={idx}>
         <ColumnSelect value={item.column} columns={columns} onChange={(value) => setParams({ casts: updateArray(casts, idx, { ...item, column: value }) })} />
         <select value={item.type} onChange={(event) => setParams({ casts: updateArray(casts, idx, { ...item, type: event.target.value }) })}>
           {DATA_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
         </select>
+        {item.type === "date" && <select value={item.format ?? "dd-mm-yyyy"} onChange={(event) => setParams({ casts: updateArray(casts, idx, { ...item, format: event.target.value }) })}>
+          {DATE_FORMAT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>}
         <button className="ghost small" onClick={() => setParams({ casts: casts.filter((_, itemIndex) => itemIndex !== idx) })}>Delete</button>
       </div>
     ))}<button className="ghost small" onClick={() => setParams({ casts: [...casts, { column: "", type: "string" }] })}>Add cast</button></div>;
@@ -1762,6 +1765,20 @@ const FILTER_OPERATORS = [
 ];
 
 const DATA_TYPES = ["string", "integer", "float", "boolean", "date", "datetime"];
+const DATE_FORMAT_OPTIONS = [
+  { value: "dd-mm-yyyy", label: "dd-mm-yyyy" },
+  { value: "dd-mm-yy", label: "dd-mm-yy" },
+  { value: "dd/mm/yyyy", label: "dd/mm/yyyy" },
+  { value: "dd/mm/yy", label: "dd/mm/yy" },
+  { value: "mm/dd/yyyy", label: "mm/dd/yyyy" },
+  { value: "mm/dd/yy", label: "mm/dd/yy" },
+  { value: "mm-dd-yyyy", label: "mm-dd-yyyy" },
+  { value: "mm-dd-yy", label: "mm-dd-yy" },
+  { value: "yyyy-mm-dd", label: "yyyy-mm-dd" },
+  { value: "yyyy/mm/dd", label: "yyyy/mm/dd" },
+  { value: "yy-mm-dd", label: "yy-mm-dd" },
+  { value: "yy/mm/dd", label: "yy/mm/dd" },
+];
 const AGG_FUNCS = ["sum", "mean", "min", "max", "count", "count_distinct", "first", "last"];
 const CONNECTION_TARGET_FIELDS = new Set(["schema", "table", "query", "path_pattern", "output_path_pattern", "operation", "format", "mode", "primary_key"]);
 

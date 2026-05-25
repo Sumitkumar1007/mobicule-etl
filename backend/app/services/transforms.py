@@ -155,9 +155,10 @@ class TransformationExecutor:
         for item in params.get("casts", []):
             column = item.get("column")
             target_type = item.get("type")
+            date_format = item.get("format")
             if column not in result.columns:
                 raise ValueError(f"Unknown column {column}")
-            result[column] = _cast_series(result[column], target_type)
+            result[column] = _cast_series(result[column], target_type, date_format)
         return result
 
     def apply_fillna(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
@@ -521,7 +522,23 @@ def _condition_mask(df: pd.DataFrame, condition: dict[str, Any]) -> pd.Series:
     raise ValueError(f"Unsupported filter operator {operator}")
 
 
-def _cast_series(series: pd.Series, target_type: Any) -> pd.Series:
+DATE_FORMATS = {
+    "dd-mm-yyyy": "%d-%m-%Y",
+    "dd-mm-yy": "%d-%m-%y",
+    "dd/mm/yyyy": "%d/%m/%Y",
+    "dd/mm/yy": "%d/%m/%y",
+    "mm/dd/yyyy": "%m/%d/%Y",
+    "mm/dd/yy": "%m/%d/%y",
+    "mm-dd-yyyy": "%m-%d-%Y",
+    "mm-dd-yy": "%m-%d-%y",
+    "yyyy-mm-dd": "%Y-%m-%d",
+    "yyyy/mm/dd": "%Y/%m/%d",
+    "yy-mm-dd": "%y-%m-%d",
+    "yy/mm/dd": "%y/%m/%d",
+}
+
+
+def _cast_series(series: pd.Series, target_type: Any, date_format: Any = None) -> pd.Series:
     if target_type == "integer":
         return pd.to_numeric(series, errors="coerce").astype("Int64")
     if target_type == "float":
@@ -529,12 +546,26 @@ def _cast_series(series: pd.Series, target_type: Any) -> pd.Series:
     if target_type == "boolean":
         return series.map(_to_bool)
     if target_type == "date":
-        return pd.to_datetime(series, errors="coerce").dt.date
+        parsed = _parse_datetime_series(series)
+        if date_format:
+            strftime_format = DATE_FORMATS.get(str(date_format))
+            if not strftime_format:
+                raise ValueError(f"Unsupported date format {date_format}")
+            return parsed.dt.strftime(strftime_format)
+        return parsed.dt.date
     if target_type == "datetime":
-        return pd.to_datetime(series, errors="coerce")
+        return _parse_datetime_series(series)
     if target_type == "string":
         return series.astype("string")
     raise ValueError(f"Unsupported cast type {target_type}")
+
+
+def _parse_datetime_series(series: pd.Series) -> pd.Series:
+    parsed = pd.to_datetime(series, errors="coerce")
+    missing = parsed.isna() & series.notna()
+    if missing.any():
+        parsed.loc[missing] = series.loc[missing].map(lambda value: pd.to_datetime(value, errors="coerce"))
+    return parsed
 
 
 def _like_mask(series: pd.Series, value: Any) -> pd.Series:

@@ -43,6 +43,22 @@ def test_ui_steps_cast_fill_derive_filter_deduplicate_sort():
     assert result == [{"id": "2", "name": "Ada", "amount": 10.0, "discount": 2.0, "city": "UNKNOWN", "net_amount": 8.0}]
 
 
+def test_cast_date_with_output_format():
+    rows = [{"notice_date": "2026-05-25"}, {"notice_date": "05/26/2026"}]
+    result = apply_transforms(
+        rows,
+        [
+            {
+                "id": "date",
+                "step_type": "cast",
+                "step_name": "Change Data Type",
+                "parameters": {"casts": [{"column": "notice_date", "type": "date", "format": "dd/mm/yy"}]},
+            }
+        ],
+    )
+    assert result == [{"notice_date": "25/05/26"}, {"notice_date": "26/05/26"}]
+
+
 def test_filter_like_and_not_like():
     rows = [
         {"id": 1, "name": "Ada Lovelace"},

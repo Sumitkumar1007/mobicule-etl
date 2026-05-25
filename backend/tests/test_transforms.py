@@ -59,6 +59,22 @@ def test_cast_date_with_output_format():
     assert result == [{"notice_date": "25/05/26"}, {"notice_date": "26/05/26"}]
 
 
+def test_cast_datetime_with_output_format():
+    rows = [{"notice_date": "2026-01-01 00:00:00"}]
+    result = apply_transforms(
+        rows,
+        [
+            {
+                "id": "date",
+                "step_type": "cast",
+                "step_name": "Change Data Type",
+                "parameters": {"casts": [{"column": "notice_date", "type": "datetime", "format": "dd/mm//yyyy"}]},
+            }
+        ],
+    )
+    assert result == [{"notice_date": "01/01/2026"}]
+
+
 def test_cast_date_rejects_numeric_and_error_tokens():
     from app.services.transforms import preview_transforms
 

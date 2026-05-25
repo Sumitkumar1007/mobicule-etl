@@ -1353,7 +1353,7 @@ function StepForm({ step, columns, sourceResources, activeSourceResource, onChan
         <select value={item.type} onChange={(event) => setParams({ casts: updateArray(casts, idx, { ...item, type: event.target.value }) })}>
           {DATA_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
         </select>
-        {item.type === "date" && <select value={item.format ?? "dd-mm-yyyy"} onChange={(event) => setParams({ casts: updateArray(casts, idx, { ...item, format: event.target.value }) })}>
+        {(item.type === "date" || item.type === "datetime") && <select value={item.format ?? "dd-mm-yyyy"} onChange={(event) => setParams({ casts: updateArray(casts, idx, { ...item, format: event.target.value }) })}>
           {DATE_FORMAT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>}
         <button className="ghost small" onClick={() => setParams({ casts: casts.filter((_, itemIndex) => itemIndex !== idx) })}>Delete</button>

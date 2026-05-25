@@ -624,6 +624,14 @@ DATE_FORMATS = {
 }
 
 
+def _strftime_format(date_format: Any) -> str:
+    normalized = str(date_format).replace("//", "/")
+    strftime_format = DATE_FORMATS.get(normalized)
+    if not strftime_format:
+        raise ValueError(f"Unsupported date format {date_format}")
+    return strftime_format
+
+
 def _cast_series(series: pd.Series, target_type: Any, date_format: Any = None) -> pd.Series:
     if target_type == "integer":
         return pd.to_numeric(series, errors="coerce").astype("Int64")
@@ -634,13 +642,13 @@ def _cast_series(series: pd.Series, target_type: Any, date_format: Any = None) -
     if target_type == "date":
         parsed = _parse_datetime_series(series)
         if date_format:
-            strftime_format = DATE_FORMATS.get(str(date_format))
-            if not strftime_format:
-                raise ValueError(f"Unsupported date format {date_format}")
-            return parsed.dt.strftime(strftime_format)
+            return parsed.dt.strftime(_strftime_format(date_format))
         return parsed.dt.date
     if target_type == "datetime":
-        return _parse_datetime_series(series)
+        parsed = _parse_datetime_series(series)
+        if date_format:
+            return parsed.dt.strftime(_strftime_format(date_format))
+        return parsed
     if target_type == "string":
         return series.astype("string")
     raise ValueError(f"Unsupported cast type {target_type}")

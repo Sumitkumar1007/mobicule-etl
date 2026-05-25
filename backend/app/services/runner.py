@@ -466,6 +466,10 @@ def _xlsx_from_rows(rows: list[dict[str, Any]]) -> bytes:
         sheet.append(headers)
         for row in rows:
             sheet.append([row.get(header) for header in headers])
+        for row in sheet.iter_rows(min_row=2):
+            for cell in row:
+                if isinstance(cell.value, str):
+                    cell.number_format = "@"
     output = io.BytesIO()
     workbook.save(output)
     return output.getvalue()

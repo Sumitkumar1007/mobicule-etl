@@ -82,19 +82,20 @@ def test_blank_columns_and_reorder_columns():
     assert result == [{"template_empty": "", "id": "A1", "template_null": None, "amount": "10"}]
 
 
-def test_preview_collects_rejected_filter_and_duplicate_rows():
+def test_preview_collects_rejected_rows_for_cast_validation_errors_only():
     from app.services.transforms import preview_transforms
 
-    rows = [{"id": "1", "amount": "10"}, {"id": "2", "amount": "0"}, {"id": "1", "amount": "10"}]
+    rows = [{"id": "1", "amount": "10"}, {"id": "2", "amount": "abc"}, {"id": "1", "amount": "10"}]
     result = preview_transforms(
         rows,
         [
+            {"id": "cast", "step_type": "cast", "step_name": "Change Data Type", "parameters": {"casts": [{"column": "amount", "type": "float"}]}},
             {"id": "filter", "step_type": "filter", "step_name": "Filter Rows", "parameters": {"conditions": [{"column": "amount", "operator": "greater_than", "value": "0"}]}},
             {"id": "dedupe", "step_type": "deduplicate", "step_name": "Remove Duplicates", "parameters": {"columns": ["id"], "keep": "first"}},
         ],
     )
-    assert result.rows == [{"id": "1", "amount": "10"}]
-    assert [row["_rejected_reason"] for row in result.rejected_rows] == ["Filter condition not matched", "Duplicate row removed"]
+    assert result.rows == [{"id": "1", "amount": 10.0}]
+    assert result.rejected_rows == [{"id": "2", "amount": "abc", "_rejected_step": "Change Data Type", "_rejected_column": "amount", "_rejected_reason": "Invalid float value"}]
 
 
 def test_filter_like_and_not_like():

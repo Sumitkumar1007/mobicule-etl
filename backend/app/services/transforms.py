@@ -52,13 +52,12 @@ class TransformationExecutor:
         input_columns = list(df.columns)
         logs: list[StepLog] = []
         warnings: list[str] = []
-        rejected_rows: list[dict[str, Any]] = []
+        self.rejected_rows: list[dict[str, Any]] = []
         for index, step in enumerate(steps, start=1):
             normalized = normalize_step(step, index)
             if not normalized.get("is_enabled", True):
                 logs.append(StepLog("INFO", f"Step {index} {normalized['step_name']} skipped", len(df), len(df), 0, normalized["id"]))
                 continue
-            before_df = df.copy()
             before = len(df)
             start = perf_counter()
             try:
@@ -66,7 +65,6 @@ class TransformationExecutor:
             except Exception as exc:
                 raise ValueError(f"Step {index} {normalized['step_name']} failed: {exc}") from exc
             duration_ms = int((perf_counter() - start) * 1000)
-            rejected_rows.extend(_rejected_records(before_df, df, normalized))
             logs.append(
                 StepLog(
                     "INFO",
@@ -79,7 +77,7 @@ class TransformationExecutor:
             )
             warnings.extend(validate_step_order(normalized, steps[: index - 1]))
         records = df.where(pd.notnull(df), None).to_dict(orient="records")
-        rejected_records = pd.DataFrame(rejected_rows).where(pd.notnull(pd.DataFrame(rejected_rows)), None).to_dict(orient="records") if rejected_rows else []
+        rejected_records = pd.DataFrame(self.rejected_rows).where(pd.notnull(pd.DataFrame(self.rejected_rows)), None).to_dict(orient="records") if self.rejected_rows else []
         output_columns = list(df.columns)
         return TransformResult(
             rows=records,
@@ -170,7 +168,17 @@ class TransformationExecutor:
             date_format = item.get("format")
             if column not in result.columns:
                 raise ValueError(f"Unknown column {column}")
-            result[column] = _cast_series(result[column], target_type, date_format)
+            converted = _cast_series(result[column], target_type, date_format)
+            invalid = _invalid_cast_mask(result[column], converted, target_type)
+            if invalid.any():
+                failed = result.loc[invalid].copy()
+                failed["_rejected_step"] = "Change Data Type"
+                failed["_rejected_column"] = column
+                failed["_rejected_reason"] = f"Invalid {target_type} value"
+                self.rejected_rows.extend(failed.where(pd.notnull(failed), None).to_dict(orient="records"))
+                result = result.loc[~invalid].copy()
+                converted = converted.loc[result.index]
+            result[column] = converted
         return result
 
     def apply_fillna(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
@@ -373,24 +381,6 @@ class TransformationExecutor:
         return df.sort_values(by=column, ascending=bool(params.get("ascending", True)))
 
 
-def _rejected_records(before_df: pd.DataFrame, after_df: pd.DataFrame, step: dict[str, Any]) -> list[dict[str, Any]]:
-    if step["step_type"] not in {"filter", "deduplicate"} or before_df.empty:
-        return []
-    rejected = before_df.loc[~before_df.index.isin(after_df.index)].copy()
-    if rejected.empty:
-        return []
-    rejected["_rejected_step"] = step["step_name"]
-    rejected["_rejected_reason"] = _rejection_reason(step)
-    return rejected.where(pd.notnull(rejected), None).to_dict(orient="records")
-
-
-def _rejection_reason(step: dict[str, Any]) -> str:
-    if step["step_type"] == "filter":
-        return "Filter condition not matched"
-    if step["step_type"] == "deduplicate":
-        return "Duplicate row removed"
-    return "Rejected by transformation"
-
 
 def apply_transforms(rows: list[dict[str, Any]], transforms: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return TransformationExecutor().run(rows, transforms).rows
@@ -544,6 +534,13 @@ def _referenced_columns(step: dict[str, Any]) -> set[str]:
     if step["step_type"] == "sort":
         return {params.get("column")} if params.get("column") else set()
     return set()
+
+
+def _invalid_cast_mask(source: pd.Series, converted: pd.Series, target_type: Any) -> pd.Series:
+    if target_type not in {"integer", "float", "boolean", "date", "datetime"}:
+        return pd.Series(False, index=source.index)
+    meaningful_source = source.notna() & source.astype("string").str.strip().ne("")
+    return meaningful_source & converted.isna()
 
 
 def _operand_value(df: pd.DataFrame, operand: dict[str, Any]) -> Any:

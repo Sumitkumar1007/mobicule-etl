@@ -661,13 +661,8 @@ def metadata_options(payload: MetadataRequest) -> dict[str, object]:
     try:
         options = source_options(payload.source_key, payload.source_config)
     except Exception as exc:
-        return {"tables": [], "paths": [], "dirs": [], "current_path": "", "error": str(exc)}
-    return {
-        "tables": options.get("tables", []),
-        "paths": options.get("paths", []),
-        "dirs": options.get("dirs", []),
-        "current_path": options.get("current_path", ""),
-    }
+        return {"tables": [], "paths": [], "error": str(exc)}
+    return {"tables": options.get("tables", []), "paths": options.get("paths", [])}
 
 
 def _resources(kind: str) -> list[Resource]:

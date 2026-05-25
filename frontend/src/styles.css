@@ -923,61 +923,6 @@ textarea {
   align-items: center;
 }
 
-
-.sftpBrowser {
-  display: grid;
-  gap: 8px;
-}
-
-.sftpCurrent {
-  align-items: center;
-  background: #f7fbf8;
-  border: 1px solid #d8e3dc;
-  border-radius: 8px;
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
-  min-height: 38px;
-  padding: 6px 8px;
-}
-
-.sftpCurrent span {
-  color: #52675c;
-  font-size: 12px;
-  font-weight: 800;
-  overflow-wrap: anywhere;
-}
-
-.sftpEntries {
-  display: grid;
-  gap: 6px;
-  max-height: 220px;
-  overflow: auto;
-}
-
-.sftpEntries button {
-  background: #fff;
-  border: 1px solid #d8e3dc;
-  border-radius: 8px;
-  color: #0b1726;
-  cursor: pointer;
-  font-weight: 800;
-  min-height: 34px;
-  overflow-wrap: anywhere;
-  padding: 7px 10px;
-  text-align: left;
-}
-
-.folderEntry::before {
-  content: "[DIR] ";
-  color: #6bbf3d;
-}
-
-.fileEntry::before {
-  content: "[FILE] ";
-  color: #7d3f98;
-}
-
 .selectOrInput {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

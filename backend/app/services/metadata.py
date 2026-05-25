@@ -30,11 +30,11 @@ def source_columns(source_key: str, config: dict[str, Any]) -> list[str]:
     return list(rows[0].keys()) if rows else []
 
 
-def source_options(source_key: str, config: dict[str, Any]) -> dict[str, list[str] | str]:
+def source_options(source_key: str, config: dict[str, Any]) -> dict[str, list[str]]:
     if source_key == "postgres_source":
         return {"tables": _postgres_tables(config)}
     if source_key == "sftp_source":
-        return _sftp_entries(config)
+        return {"paths": _sftp_paths(config)}
     return {}
 
 
@@ -133,7 +133,7 @@ def _sftp_columns(config: dict[str, Any]) -> list[str]:
         transport.close()
 
 
-def _sftp_entries(config: dict[str, Any]) -> dict[str, list[str] | str]:
+def _sftp_paths(config: dict[str, Any]) -> list[str]:
     try:
         import paramiko
     except ImportError as exc:
@@ -152,15 +152,12 @@ def _sftp_entries(config: dict[str, Any]) -> dict[str, list[str] | str]:
         transport.connect(username=username, password=password, pkey=pkey)
         client = paramiko.SFTPClient.from_transport(transport)
         directory = _sftp_option_directory(client, seed)
-        dirs: list[str] = []
-        files: list[str] = []
-        for item in client.listdir_attr(directory):
-            path = posixpath.join(directory, item.filename)
-            if stat.S_ISDIR(item.st_mode):
-                dirs.append(path)
-            else:
-                files.append(path)
-        return {"current_path": directory, "dirs": sorted(dirs), "paths": sorted(files)}
+        items = client.listdir_attr(directory)
+        return [
+            posixpath.join(directory, item.filename)
+            for item in items
+            if not stat.S_ISDIR(item.st_mode)
+        ]
     finally:
         transport.close()
 

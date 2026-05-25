@@ -5,8 +5,6 @@ import "./styles.css";
 const API = import.meta.env.VITE_API_URL ?? "http://10.10.0.10:8000/api";
 const SESSION_KEY = "mobiflow_session";
 
-type TargetOptions = { tables: string[]; paths: string[]; dirs: string[]; current_path: string };
-
 type Connector = {
   key: string;
   name: string;
@@ -154,8 +152,8 @@ function App() {
   const [testingConnectorKey, setTestingConnectorKey] = useState<string | null>(null);
   const [sourceColumns, setSourceColumns] = useState<string[]>([]);
   const [destinationColumns, setDestinationColumns] = useState<string[]>([]);
-  const [sourceTargetOptions, setSourceTargetOptions] = useState<TargetOptions>({ tables: [], paths: [], dirs: [], current_path: "" });
-  const [destinationTargetOptions, setDestinationTargetOptions] = useState<TargetOptions>({ tables: [], paths: [], dirs: [], current_path: "" });
+  const [sourceTargetOptions, setSourceTargetOptions] = useState<{ tables: string[]; paths: string[] }>({ tables: [], paths: [] });
+  const [destinationTargetOptions, setDestinationTargetOptions] = useState<{ tables: string[]; paths: string[] }>({ tables: [], paths: [] });
   const lastSourceOptionsKey = useRef("");
   const lastDestinationOptionsKey = useRef("");
   const [columnSearch, setColumnSearch] = useState("");
@@ -580,11 +578,11 @@ function App() {
   async function loadTargetOptions(resource: Resource, overrides: Record<string, unknown>, target: "source" | "destination") {
     const metadataKey = resource.connector_key.replace("_destination", "_source");
     const merged = { ...resource.config, ...overrides };
-    const result = await api<TargetOptions & { error?: string }>("/metadata/options", {
+    const result = await api<{ tables: string[]; paths: string[]; error?: string }>("/metadata/options", {
       method: "POST",
       body: JSON.stringify({ source_key: metadataKey, source_config: merged })
     });
-    const next = { tables: result.tables ?? [], paths: result.paths ?? [], dirs: result.dirs ?? [], current_path: result.current_path ?? "" };
+    const next = { tables: result.tables ?? [], paths: result.paths ?? [] };
     if (target === "source") setSourceTargetOptions(next);
     else setDestinationTargetOptions(next);
     if (result.error) setToast({ tone: "bad", text: result.error });
@@ -805,13 +803,13 @@ function App() {
                 onSourceChange={(value) => {
                   const resource = sourceResources.find((item) => String(item.id) === value);
                   setTransformationDraft({ ...transformationDraft, source_id: value, source_config: {} });
-                  setSourceTargetOptions(emptyTargetOptions());
+                  setSourceTargetOptions({ tables: [], paths: [] });
                   lastSourceOptionsKey.current = "";
                   if (resource && resource.connector_key !== "sftp_source") loadColumnsFor(resource, "source", {}).catch(showError);
                 }}
                 onDestinationChange={(value) => {
                   setTransformationDraft({ ...transformationDraft, destination_id: value, destination_config: {} });
-                  setDestinationTargetOptions(emptyTargetOptions());
+                  setDestinationTargetOptions({ tables: [], paths: [] });
                   lastDestinationOptionsKey.current = "";
                 }}
                 onSourceConfigChange={(value) => {
@@ -1106,8 +1104,8 @@ function SchemaExplorer({
   destinationId: string;
   sourceConfig: Record<string, unknown>;
   destinationConfig: Record<string, unknown>;
-  sourceOptions: TargetOptions;
-  destinationOptions: TargetOptions;
+  sourceOptions: { tables: string[]; paths: string[] };
+  destinationOptions: { tables: string[]; paths: string[] };
   columns: string[];
   search: string;
   onSearch: (value: string) => void;
@@ -1157,7 +1155,7 @@ function SchemaExplorer({
   );
 }
 
-function DatasetTargetEditor({ title, resource, value, options, onChange }: { title: string; resource: Resource; value: Record<string, unknown>; options: TargetOptions; onChange: (value: Record<string, unknown>) => void }) {
+function DatasetTargetEditor({ title, resource, value, options, onChange }: { title: string; resource: Resource; value: Record<string, unknown>; options: { tables: string[]; paths: string[] }; onChange: (value: Record<string, unknown>) => void }) {
   if (resource.connector_key === "postgres_source") {
     return <div className="formGrid two">
       <label>{title} schema<input value={String(value.schema ?? "public")} onChange={(event) => onChange({ ...value, schema: event.target.value })} placeholder="public" /></label>
@@ -1165,8 +1163,9 @@ function DatasetTargetEditor({ title, resource, value, options, onChange }: { ti
     </div>;
   }
   if (resource.connector_key === "sftp_source") {
+    const fileOptions = sftpPathOptions(resource, options.paths, String(value.remote_path ?? ""));
     return <div className="formGrid two">
-      <SftpPathBrowser title={`${title} file path`} resource={resource} value={String(value.remote_path ?? "")} options={options} onChange={(next) => onChange({ ...value, remote_path: next })} />
+      <label>{title} file path<SelectOrInput value={String(value.remote_path ?? "")} options={fileOptions} placeholder="customers.csv" onChange={(next) => onChange({ ...value, remote_path: next })} /></label>
       <label>{title} format<select value={String(value.format ?? "csv")} onChange={(event) => onChange({ ...value, format: event.target.value })}><option value="csv">csv</option><option value="xlsx">xlsx</option></select></label>
     </div>;
   }
@@ -1179,8 +1178,9 @@ function DatasetTargetEditor({ title, resource, value, options, onChange }: { ti
     </div>;
   }
   if (resource.connector_key === "sftp_destination") {
+    const fileOptions = sftpPathOptions(resource, options.paths, String(value.remote_path ?? ""));
     return <div className="formGrid two">
-      <SftpPathBrowser title={`${title} output path`} resource={resource} value={String(value.remote_path ?? "")} options={options} onChange={(next) => onChange({ ...value, remote_path: next })} />
+      <label>{title} output path<SelectOrInput value={String(value.remote_path ?? "")} options={fileOptions} placeholder="result.csv" onChange={(next) => onChange({ ...value, remote_path: next })} /></label>
       <label>{title} format<select value={String(value.format ?? "csv")} onChange={(event) => onChange({ ...value, format: event.target.value })}><option value="csv">csv</option><option value="xlsx">xlsx</option></select></label>
     </div>;
   }
@@ -1198,39 +1198,18 @@ function SelectOrInput({ value, options, placeholder, onChange }: { value: strin
   </div>;
 }
 
-function SftpPathBrowser({ title, resource, value, options, onChange }: { title: string; resource: Resource; value: string; options: TargetOptions; onChange: (value: string) => void }) {
-  const currentPath = options.current_path || value || String(resource.config.remote_path ?? "");
-  const parent = parentPath(currentPath);
-  return <div className="sftpBrowser fullWidth">
-    <label>{title}<input value={value} onChange={(event) => onChange(event.target.value)} placeholder="/home/neha/Documents/file.xlsx" /></label>
-    <div className="sftpCurrent">
-      <span>{currentPath || "Select a path"}</span>
-      {parent && <button className="ghost small" type="button" onClick={() => onChange(parent)}>Up</button>}
-    </div>
-    <div className="sftpEntries">
-      {options.dirs.map((path) => <button className="folderEntry" key={path} type="button" onClick={() => onChange(path)}>{relativePathLabel(resource, path)}</button>)}
-      {options.paths.map((path) => <button className="fileEntry" key={path} type="button" onClick={() => onChange(path)}>{relativePathLabel(resource, path)}</button>)}
-      {!options.dirs.length && !options.paths.length && <span className="emptyState">No folders/files loaded.</span>}
-    </div>
-  </div>;
-}
-
-function relativePathLabel(resource: Resource, path: string) {
+function sftpPathOptions(resource: Resource, paths: string[], currentValue: string) {
   const basePath = String(resource.config.remote_path ?? "");
-  const normalizedBase = basePath.endsWith("/") ? basePath : `${basePath}/`;
-  return path.startsWith(normalizedBase) ? path.slice(normalizedBase.length) : path.split("/").pop() || path;
+  const options = paths.map((path) => {
+    const normalizedBase = basePath.endsWith("/") ? basePath : `${basePath}/`;
+    const label = path.startsWith(normalizedBase) ? path.slice(normalizedBase.length) : path.split("/").pop() || path;
+    return { label, value: path };
+  });
+  if (currentValue && !options.some((item) => item.value === currentValue)) {
+    options.unshift({ label: currentValue.split("/").pop() || currentValue, value: currentValue });
+  }
+  return options;
 }
-
-function parentPath(path: string) {
-  const clean = path.replace(/\/$/, "");
-  const parent = clean.slice(0, clean.lastIndexOf("/")) || "/";
-  return parent === clean ? "" : parent;
-}
-
-function emptyTargetOptions(): TargetOptions {
-  return { tables: [], paths: [], dirs: [], current_path: "" };
-}
-
 
 function LoginPage({
   loginEmail,

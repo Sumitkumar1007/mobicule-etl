@@ -1208,8 +1208,8 @@ function SftpPathBrowser({ title, resource, value, options, onChange }: { title:
       {parent && <button className="ghost small" type="button" onClick={() => onChange(parent)}>Up</button>}
     </div>
     <div className="sftpEntries">
-      {options.dirs.map((path) => <button className="folderEntry" key={path} type="button" title={path} onClick={() => onChange(path)}><span>{fileName(path)}</span></button>)}
-      {options.paths.map((path) => <button className="fileEntry" key={path} type="button" title={path} onClick={() => onChange(path)}><span>{fileName(path)}</span></button>)}
+      {options.dirs.map((path) => <button className="folderEntry" key={path} type="button" onClick={() => onChange(path)}>{relativePathLabel(resource, path)}</button>)}
+      {options.paths.map((path) => <button className="fileEntry" key={path} type="button" onClick={() => onChange(path)}>{relativePathLabel(resource, path)}</button>)}
       {!options.dirs.length && !options.paths.length && <span className="emptyState">No folders/files loaded.</span>}
     </div>
   </div>;
@@ -1219,10 +1219,6 @@ function relativePathLabel(resource: Resource, path: string) {
   const basePath = String(resource.config.remote_path ?? "");
   const normalizedBase = basePath.endsWith("/") ? basePath : `${basePath}/`;
   return path.startsWith(normalizedBase) ? path.slice(normalizedBase.length) : path.split("/").pop() || path;
-}
-
-function fileName(path: string) {
-  return path.replace(/\/$/, "").split("/").pop() || path;
 }
 
 function parentPath(path: string) {

@@ -956,36 +956,26 @@ textarea {
 }
 
 .sftpEntries button {
-  align-items: center;
   background: #fff;
   border: 1px solid #d8e3dc;
   border-radius: 8px;
   color: #0b1726;
   cursor: pointer;
-  display: grid;
   font-weight: 800;
-  grid-template-columns: auto minmax(0, 1fr);
-  min-height: 36px;
+  min-height: 34px;
+  overflow-wrap: anywhere;
   padding: 7px 10px;
   text-align: left;
 }
 
-.sftpEntries button span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .folderEntry::before {
+  content: "[DIR] ";
   color: #6bbf3d;
-  content: "[DIR]";
-  margin-right: 8px;
 }
 
 .fileEntry::before {
+  content: "[FILE] ";
   color: #7d3f98;
-  content: "[FILE]";
-  margin-right: 8px;
 }
 
 .selectOrInput {

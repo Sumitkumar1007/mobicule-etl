@@ -152,8 +152,8 @@ function App() {
   const [testingConnectorKey, setTestingConnectorKey] = useState<string | null>(null);
   const [sourceColumns, setSourceColumns] = useState<string[]>([]);
   const [destinationColumns, setDestinationColumns] = useState<string[]>([]);
-  const [sourceTargetOptions, setSourceTargetOptions] = useState<{ tables: string[]; paths: string[] }>({ tables: [], paths: [] });
-  const [destinationTargetOptions, setDestinationTargetOptions] = useState<{ tables: string[]; paths: string[] }>({ tables: [], paths: [] });
+  const [sourceTargetOptions, setSourceTargetOptions] = useState<{ tables: string[]; paths: string[]; sheets: string[] }>({ tables: [], paths: [], sheets: [] });
+  const [destinationTargetOptions, setDestinationTargetOptions] = useState<{ tables: string[]; paths: string[]; sheets: string[] }>({ tables: [], paths: [], sheets: [] });
   const lastSourceOptionsKey = useRef("");
   const lastDestinationOptionsKey = useRef("");
   const [columnSearch, setColumnSearch] = useState("");
@@ -578,11 +578,11 @@ function App() {
   async function loadTargetOptions(resource: Resource, overrides: Record<string, unknown>, target: "source" | "destination") {
     const metadataKey = resource.connector_key.replace("_destination", "_source");
     const merged = { ...resource.config, ...overrides };
-    const result = await api<{ tables: string[]; paths: string[]; error?: string }>("/metadata/options", {
+    const result = await api<{ tables: string[]; paths: string[]; sheets?: string[]; error?: string }>("/metadata/options", {
       method: "POST",
       body: JSON.stringify({ source_key: metadataKey, source_config: merged })
     });
-    const next = { tables: result.tables ?? [], paths: result.paths ?? [] };
+    const next = { tables: result.tables ?? [], paths: result.paths ?? [], sheets: result.sheets ?? [] };
     if (target === "source") setSourceTargetOptions(next);
     else setDestinationTargetOptions(next);
     if (result.error) setToast({ tone: "bad", text: result.error });
@@ -803,13 +803,13 @@ function App() {
                 onSourceChange={(value) => {
                   const resource = sourceResources.find((item) => String(item.id) === value);
                   setTransformationDraft({ ...transformationDraft, source_id: value, source_config: {} });
-                  setSourceTargetOptions({ tables: [], paths: [] });
+                  setSourceTargetOptions({ tables: [], paths: [], sheets: [] });
                   lastSourceOptionsKey.current = "";
                   if (resource && resource.connector_key !== "sftp_source") loadColumnsFor(resource, "source", {}).catch(showError);
                 }}
                 onDestinationChange={(value) => {
                   setTransformationDraft({ ...transformationDraft, destination_id: value, destination_config: {} });
-                  setDestinationTargetOptions({ tables: [], paths: [] });
+                  setDestinationTargetOptions({ tables: [], paths: [], sheets: [] });
                   lastDestinationOptionsKey.current = "";
                 }}
                 onSourceConfigChange={(value) => {
@@ -1104,8 +1104,8 @@ function SchemaExplorer({
   destinationId: string;
   sourceConfig: Record<string, unknown>;
   destinationConfig: Record<string, unknown>;
-  sourceOptions: { tables: string[]; paths: string[] };
-  destinationOptions: { tables: string[]; paths: string[] };
+  sourceOptions: { tables: string[]; paths: string[]; sheets: string[] };
+  destinationOptions: { tables: string[]; paths: string[]; sheets: string[] };
   columns: string[];
   search: string;
   onSearch: (value: string) => void;
@@ -1155,7 +1155,7 @@ function SchemaExplorer({
   );
 }
 
-function DatasetTargetEditor({ title, resource, value, options, onChange }: { title: string; resource: Resource; value: Record<string, unknown>; options: { tables: string[]; paths: string[] }; onChange: (value: Record<string, unknown>) => void }) {
+function DatasetTargetEditor({ title, resource, value, options, onChange }: { title: string; resource: Resource; value: Record<string, unknown>; options: { tables: string[]; paths: string[]; sheets: string[] }; onChange: (value: Record<string, unknown>) => void }) {
   if (resource.connector_key === "postgres_source") {
     return <div className="formGrid two">
       <label>{title} schema<input value={String(value.schema ?? "public")} onChange={(event) => onChange({ ...value, schema: event.target.value })} placeholder="public" /></label>
@@ -1164,9 +1164,11 @@ function DatasetTargetEditor({ title, resource, value, options, onChange }: { ti
   }
   if (resource.connector_key === "sftp_source") {
     const fileOptions = sftpPathOptions(resource, options.paths, String(value.remote_path ?? ""));
+    const isXlsx = String(value.format ?? "csv") === "xlsx" || String(value.remote_path ?? "").endsWith(".xlsx");
     return <div className="formGrid two">
-      <label>{title} file path<SelectOrInput value={String(value.remote_path ?? "")} options={fileOptions} placeholder="customers.csv" onChange={(next) => onChange({ ...value, remote_path: next })} /></label>
-      <label>{title} format<select value={String(value.format ?? "csv")} onChange={(event) => onChange({ ...value, format: event.target.value })}><option value="csv">csv</option><option value="xlsx">xlsx</option></select></label>
+      <label>{title} file path<SelectOrInput value={String(value.remote_path ?? "")} options={fileOptions} placeholder="customers.csv" onChange={(next) => onChange({ ...value, remote_path: next, sheet_name: "" })} /></label>
+      <label>{title} format<select value={String(value.format ?? "csv")} onChange={(event) => onChange({ ...value, format: event.target.value, sheet_name: "" })}><option value="csv">csv</option><option value="xlsx">xlsx</option></select></label>
+      {isXlsx && options.sheets.length > 1 && <label>Sheet<select value={String(value.sheet_name ?? "")} onChange={(event) => onChange({ ...value, sheet_name: event.target.value })}><option value="">First sheet</option>{options.sheets.map((sheet) => <option key={sheet} value={sheet}>{sheet}</option>)}</select></label>}
     </div>;
   }
   if (resource.connector_key === "postgres_destination") {

@@ -155,7 +155,7 @@ def _extract_sftp(config: dict[str, Any]) -> list[dict[str, Any]]:
             with client.open(remote_path, "r") as handle:
                 content = handle.read()
             if config.get("format") == "xlsx" or remote_path.endswith(".xlsx"):
-                file_rows = _rows_from_xlsx(content if isinstance(content, bytes) else content.encode("utf-8"))
+                file_rows = _rows_from_xlsx(content if isinstance(content, bytes) else content.encode("utf-8"), config.get("sheet_name"))
             else:
                 if isinstance(content, bytes):
                     content = content.decode("utf-8")
@@ -440,13 +440,13 @@ def _format_path_pattern(pattern: str) -> str:
     return pattern.format(**values)
 
 
-def _rows_from_xlsx(content: bytes) -> list[dict[str, Any]]:
+def _rows_from_xlsx(content: bytes, sheet_name: Any = None) -> list[dict[str, Any]]:
     import io
 
     from openpyxl import load_workbook
 
     workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
-    sheet = workbook.active
+    sheet = workbook[str(sheet_name)] if sheet_name and str(sheet_name) in workbook.sheetnames else workbook.active
     rows = list(sheet.iter_rows(values_only=True))
     if not rows:
         return []

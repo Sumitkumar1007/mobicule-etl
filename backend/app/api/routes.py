@@ -662,7 +662,7 @@ def metadata_options(payload: MetadataRequest) -> dict[str, object]:
         options = source_options(payload.source_key, payload.source_config)
     except Exception as exc:
         return {"tables": [], "paths": [], "error": str(exc)}
-    return {"tables": options.get("tables", []), "paths": options.get("paths", [])}
+    return {"tables": options.get("tables", []), "paths": options.get("paths", []), "sheets": options.get("sheets", [])}
 
 
 def _resources(kind: str) -> list[Resource]:

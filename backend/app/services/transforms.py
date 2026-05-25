@@ -555,8 +555,15 @@ def _split_column_names(value: str) -> list[str]:
 def _invalid_cast_mask(source: pd.Series, converted: pd.Series, target_type: Any) -> pd.Series:
     if target_type not in {"integer", "float", "boolean", "date", "datetime"}:
         return pd.Series(False, index=source.index)
-    meaningful_source = source.notna() & source.astype("string").str.strip().ne("")
-    return meaningful_source & converted.isna()
+    source_text = source.astype("string").str.strip()
+    meaningful_source = source.notna() & source_text.ne("")
+    invalid = meaningful_source & converted.isna()
+    if target_type in {"date", "datetime"}:
+        numeric_source = source.map(lambda value: isinstance(value, int | float) and not isinstance(value, bool))
+        numeric_text = source_text.str.fullmatch(r"[+-]?\d+(?:\.0+)?", na=False)
+        error_token = source_text.str.startswith("#", na=False)
+        invalid = invalid | (meaningful_source & (numeric_source | numeric_text | error_token))
+    return invalid
 
 
 def _operand_value(df: pd.DataFrame, operand: dict[str, Any]) -> Any:

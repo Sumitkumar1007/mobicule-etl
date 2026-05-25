@@ -59,6 +59,30 @@ def test_cast_date_with_output_format():
     assert result == [{"notice_date": "25/05/26"}, {"notice_date": "26/05/26"}]
 
 
+def test_cast_date_rejects_numeric_and_error_tokens():
+    from app.services.transforms import preview_transforms
+
+    rows = [
+        {"account": "ok", "notice_date": "2026-01-01"},
+        {"account": "bad-number", "notice_date": "123456"},
+        {"account": "bad-token", "notice_date": "#VALUE!"},
+    ]
+    result = preview_transforms(
+        rows,
+        [
+            {
+                "id": "date",
+                "step_type": "cast",
+                "step_name": "Change Data Type",
+                "parameters": {"casts": [{"column": "notice_date", "type": "date", "format": "dd-mm-yyyy"}]},
+            }
+        ],
+    )
+    assert result.rows == [{"account": "ok", "notice_date": "01-01-2026"}]
+    assert [row["account"] for row in result.rejected_rows] == ["bad-number", "bad-token"]
+    assert all(row["_rejected_reason"] == "Invalid date value" for row in result.rejected_rows)
+
+
 def test_blank_columns_and_reorder_columns():
     rows = [{"id": "A1", "amount": "10"}]
     result = apply_transforms(

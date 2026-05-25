@@ -1330,12 +1330,16 @@ function StepForm({ step, columns, sourceResources, activeSourceResource, onChan
   const setParams = (parameters: Record<string, unknown>) => onChange({ ...step, parameters });
   if (step.step_type === "select") {
     const selected = params.columns as string[] ?? [];
-    return <div className="columnChips">{columns.map((column) => (
-      <button className={selected.includes(column) ? "selectedChip" : ""} key={column} onClick={() => {
-        const next = selected.includes(column) ? selected.filter((item) => item !== column) : [...selected, column];
-        setParams({ columns: next });
-      }}>{column}</button>
-    ))}</div>;
+    const allSelected = columns.length > 0 && columns.every((column) => selected.includes(column));
+    return <div className="ruleStack">
+      <label className="toggle"><input type="checkbox" checked={allSelected} onChange={(event) => setParams({ columns: event.target.checked ? columns : [] })} />Select all</label>
+      <div className="columnChips">{columns.map((column) => (
+        <button className={selected.includes(column) ? "selectedChip" : ""} key={column} onClick={() => {
+          const next = selected.includes(column) ? selected.filter((item) => item !== column) : [...selected, column];
+          setParams({ columns: next });
+        }}>{column}</button>
+      ))}</div>
+    </div>;
   }
   if (step.step_type === "rename") {
     const mappings = params.mappings as { source: string; target: string }[] ?? [];

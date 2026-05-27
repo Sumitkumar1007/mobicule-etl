@@ -1,6 +1,6 @@
 # MobiFlow ETL
 
-MobiFlow ETL is a UI-driven ETL control plane. Users create datasources, destinations, visual transformation steps, pipelines, schedules, and run logs without writing JSON or Python code.
+MobiFlow ETL is a UI-driven ETL control plane. Users create datasources, destinations, visual transformation steps, pipelines, schedules, and run logs through a low-code workflow.
 
 ## Stack
 

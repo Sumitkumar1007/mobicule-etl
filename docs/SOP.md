@@ -78,7 +78,7 @@ Left menu sections:
 
 - `Data Source`: configure source connectors.
 - `Destination`: configure output connectors.
-- `Transform`: build no-code transformation steps.
+- `Transform`: build low-code transformation steps.
 - `Pipelines`: attach source, transformation, destination, and schedule.
 - `Runs & Logs`: inspect execution history and step logs.
 - `Access Control`: create users and roles.

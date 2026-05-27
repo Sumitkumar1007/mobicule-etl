@@ -664,7 +664,7 @@ function App() {
       <section className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">No-code data movement</p>
+            <p className="eyebrow">Low-code data movement</p>
           </div>
           <div className="topbarActions">
             {isAdmin && activeMenu === "pipelines" && <button className="primary" onClick={() => savePipeline().catch(showError)}>{editingPipelineId ? "Update pipeline" : "Save pipeline"}</button>}

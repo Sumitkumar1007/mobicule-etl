@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from time import perf_counter
 from typing import Any
 
@@ -30,6 +30,14 @@ STEP_ORDER = {
 }
 
 INTERNAL_ROW_ID = "__mobiflow_original_row_id"
+ALLOWED_CUSTOM_IMPORTS = {"datetime", "math", "numpy", "pandas", "re", "time"}
+
+
+def _safe_custom_import(name: str, globals: dict[str, Any] | None = None, locals: dict[str, Any] | None = None, fromlist: tuple[Any, ...] = (), level: int = 0) -> Any:
+    root = name.split(".", 1)[0]
+    if root not in ALLOWED_CUSTOM_IMPORTS:
+        raise ImportError(f"Import {name} is not allowed in Custom Transform")
+    return __import__(name, globals, locals, fromlist, level)
 
 
 @dataclass
@@ -446,8 +454,9 @@ class TransformationExecutor:
             "sum": sum,
             "tuple": tuple,
             "zip": zip,
+            "__import__": _safe_custom_import,
         }
-        scope: dict[str, Any] = {"__builtins__": safe_builtins, "pd": pd, "np": np, "df": df.copy()}
+        scope: dict[str, Any] = {"__builtins__": safe_builtins, "date": date, "datetime": datetime, "pd": pd, "np": np, "df": df.copy()}
         exec(code, scope, scope)
         result = scope.get("result")
         transform = scope.get("transform")

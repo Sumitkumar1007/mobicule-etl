@@ -545,6 +545,51 @@ def test_custom_transform_supports_numpy_helper():
     assert result == [{"amount": 10, "bucket": "low"}, {"amount": 20, "bucket": "high"}]
 
 
+def test_custom_transform_supports_pandas_timestamp_date_formatting():
+    rows = [{"customer_id": "1"}]
+    result = apply_transforms(
+        rows,
+        [
+            {
+                "id": "custom",
+                "step_type": "custom",
+                "step_name": "Custom Transform",
+                "parameters": {
+                    "code": "\n".join([
+                        "def transform(df):",
+                        "    current_date = pd.Timestamp.now().strftime('%d/%m/%Y')",
+                        "    df['NOTICE_COMMUNICATION_DATE'] = current_date",
+                        "    return df",
+                    ])
+                },
+            }
+        ],
+    )
+
+    assert result[0]["customer_id"] == "1"
+    assert len(result[0]["NOTICE_COMMUNICATION_DATE"]) == 10
+
+
+def test_custom_transform_blocks_unsafe_imports():
+    rows = [{"customer_id": "1"}]
+    try:
+        apply_transforms(
+            rows,
+            [
+                {
+                    "id": "custom",
+                    "step_type": "custom",
+                    "step_name": "Custom Transform",
+                    "parameters": {"code": "import os\nresult = df"},
+                }
+            ],
+        )
+    except ValueError as exc:
+        assert "Import os is not allowed in Custom Transform" in str(exc)
+    else:
+        raise AssertionError("unsafe import was not blocked")
+
+
 def test_custom_transform_declared_output_columns_help_validation():
     result = validate_transforms(
         ["customer_id", "amount"],

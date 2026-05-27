@@ -315,6 +315,8 @@ def _rows_payload(path: str, rows: list[dict[str, Any]]) -> bytes:
     if path.endswith(".xlsx"):
         payload = _xlsx_from_rows(rows)
         return payload if isinstance(payload, bytes) else payload.encode("utf-8")
+    if path.endswith(".jsonl"):
+        return "".join(json.dumps(row, default=str) + "\n" for row in rows).encode("utf-8")
     import io
 
     output = io.StringIO()

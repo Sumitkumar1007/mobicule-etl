@@ -85,6 +85,14 @@ def test_validate_source_query_blocks_multiple_statements():
         raise AssertionError("Expected multiple statements to fail")
 
 
+def test_rejected_rows_payload_uses_jsonl_for_jsonl_path():
+    from app.services.runner import _rows_payload
+
+    payload = _rows_payload("/out/final_rejected.jsonl", [{"id": "2", "_rejected_reason": "Invalid float value"}])
+
+    assert payload.decode("utf-8").splitlines() == ['{"id": "2", "_rejected_reason": "Invalid float value"}']
+
+
 def test_rejected_output_path_adds_datetime_before_extension(monkeypatch):
     from datetime import UTC, datetime
 

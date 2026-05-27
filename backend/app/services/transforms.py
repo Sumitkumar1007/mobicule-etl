@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any
@@ -26,6 +27,8 @@ STEP_ORDER = {
     "sort": 15,
 }
 
+INTERNAL_ROW_ID = "__mobiflow_original_row_id"
+
 
 @dataclass
 class StepLog:
@@ -46,13 +49,52 @@ class TransformResult:
     rejected_rows: list[dict[str, Any]] = field(default_factory=list)
 
 
+class RejectionHandler:
+    def __init__(self, original_rows: list[dict[str, Any]]):
+        self.original_rows = {index: _clean_record(row) for index, row in enumerate(original_rows)}
+        self.rows: list[dict[str, Any]] = []
+
+    def attach_tracking(self, df: pd.DataFrame) -> pd.DataFrame:
+        if df.empty:
+            return df
+        tracked = df.copy()
+        tracked[INTERNAL_ROW_ID] = list(range(len(tracked)))
+        return tracked
+
+    def reject_rows(self, rows: pd.DataFrame, step_name: str, column: str, reason: str) -> None:
+        for raw_row in rows.to_dict(orient="records"):
+            row = {key: _clean_value(value) for key, value in raw_row.items()}
+            row_id = row.pop(INTERNAL_ROW_ID, None)
+            original = self._original_record(row_id, row)
+            rejected = dict(original)
+            rejected.update(
+                {
+                    "_rejected_step": step_name,
+                    "_rejected_column": column,
+                    "_rejected_reason": reason,
+                    "_original_record": json.dumps(original, separators=(",", ":"), default=str),
+                }
+            )
+            self.rows.append(rejected)
+
+    def _original_record(self, row_id: Any, fallback: dict[str, Any]) -> dict[str, Any]:
+        try:
+            key = int(row_id)
+        except (TypeError, ValueError):
+            key = None
+        if key is not None and key in self.original_rows:
+            return self.original_rows[key]
+        return _clean_record(fallback)
+
+
 class TransformationExecutor:
     def run(self, rows: list[dict[str, Any]], steps: list[dict[str, Any]]) -> TransformResult:
         df = pd.DataFrame(rows)
         input_columns = list(df.columns)
+        self.rejections = RejectionHandler(rows)
+        df = self.rejections.attach_tracking(df)
         logs: list[StepLog] = []
         warnings: list[str] = []
-        self.rejected_rows: list[dict[str, Any]] = []
         for index, step in enumerate(steps, start=1):
             normalized = normalize_step(step, index)
             if not normalized.get("is_enabled", True):
@@ -76,9 +118,9 @@ class TransformationExecutor:
                 )
             )
             warnings.extend(validate_step_order(normalized, steps[: index - 1]))
-        records = df.where(pd.notnull(df), None).to_dict(orient="records")
-        rejected_records = pd.DataFrame(self.rejected_rows).where(pd.notnull(pd.DataFrame(self.rejected_rows)), None).to_dict(orient="records") if self.rejected_rows else []
-        output_columns = list(df.columns)
+        output_df = _drop_internal_columns(df)
+        records = _records_from_frame(output_df)
+        output_columns = list(output_df.columns)
         return TransformResult(
             rows=records,
             logs=logs,
@@ -88,7 +130,7 @@ class TransformationExecutor:
                 "removed": [col for col in input_columns if col not in output_columns],
                 "kept": [col for col in output_columns if col in input_columns],
             },
-            rejected_rows=rejected_records,
+            rejected_rows=self.rejections.rows,
         )
 
     def apply_step(self, df: pd.DataFrame, step: dict[str, Any]) -> pd.DataFrame:
@@ -130,6 +172,8 @@ class TransformationExecutor:
         columns = [col for col in params.get("columns", []) if col in df.columns]
         if not columns:
             return df
+        if INTERNAL_ROW_ID in df.columns and INTERNAL_ROW_ID not in columns:
+            columns.append(INTERNAL_ROW_ID)
         return df.loc[:, columns].copy()
 
     def apply_rename(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
@@ -172,10 +216,7 @@ class TransformationExecutor:
             invalid = _invalid_cast_mask(result[column], converted, target_type)
             if invalid.any():
                 failed = result.loc[invalid].copy()
-                failed["_rejected_step"] = "Change Data Type"
-                failed["_rejected_column"] = column
-                failed["_rejected_reason"] = f"Invalid {target_type} value"
-                self.rejected_rows.extend(failed.where(pd.notnull(failed), None).to_dict(orient="records"))
+                self.rejections.reject_rows(failed, "Change Data Type", str(column), f"Invalid {target_type} value")
                 result = result.loc[~invalid].copy()
                 converted = converted.loc[result.index]
             result[column] = converted
@@ -546,6 +587,35 @@ def _referenced_columns(step: dict[str, Any]) -> set[str]:
     if step["step_type"] == "sort":
         return {params.get("column")} if params.get("column") else set()
     return set()
+
+
+def _drop_internal_columns(df: pd.DataFrame) -> pd.DataFrame:
+    return df.drop(columns=[INTERNAL_ROW_ID], errors="ignore")
+
+
+def _records_from_frame(df: pd.DataFrame) -> list[dict[str, Any]]:
+    return [_clean_record(record) for record in df.to_dict(orient="records")]
+
+
+def _clean_record(record: dict[str, Any]) -> dict[str, Any]:
+    return {key: _clean_value(value) for key, value in record.items() if key != INTERNAL_ROW_ID}
+
+
+def _clean_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return _clean_record(value)
+    if isinstance(value, list):
+        return [_clean_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_clean_value(item) for item in value]
+    if isinstance(value, np.generic):
+        return value.item()
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return value
 
 
 def _split_column_names(value: str) -> list[str]:

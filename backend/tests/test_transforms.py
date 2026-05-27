@@ -96,7 +96,37 @@ def test_cast_date_rejects_numeric_and_error_tokens():
     )
     assert result.rows == [{"account": "ok", "notice_date": "01-01-2026"}]
     assert [row["account"] for row in result.rejected_rows] == ["bad-number", "bad-token"]
+    assert result.rejected_rows[0]["_original_record"] == "{\"account\":\"bad-number\",\"notice_date\":\"123456\"}"
     assert all(row["_rejected_reason"] == "Invalid date value" for row in result.rejected_rows)
+
+
+def test_rejected_rows_keep_original_record_after_column_selection():
+    from app.services.transforms import preview_transforms
+
+    rows = [
+        {"id": "1", "name": "Ada", "amount": "10"},
+        {"id": "2", "name": "Grace", "amount": "abc"},
+    ]
+    result = preview_transforms(
+        rows,
+        [
+            {"id": "select", "step_type": "select", "step_name": "Select Columns", "parameters": {"columns": ["id", "amount"]}},
+            {"id": "cast", "step_type": "cast", "step_name": "Change Data Type", "parameters": {"casts": [{"column": "amount", "type": "float"}]}},
+        ],
+    )
+
+    assert result.rows == [{"id": "1", "amount": 10.0}]
+    assert result.rejected_rows == [
+        {
+            "id": "2",
+            "name": "Grace",
+            "amount": "abc",
+            "_rejected_step": "Change Data Type",
+            "_rejected_column": "amount",
+            "_rejected_reason": "Invalid float value",
+            "_original_record": "{\"id\":\"2\",\"name\":\"Grace\",\"amount\":\"abc\"}",
+        }
+    ]
 
 
 def test_blank_columns_and_reorder_columns():
@@ -135,7 +165,16 @@ def test_preview_collects_rejected_rows_for_cast_validation_errors_only():
         ],
     )
     assert result.rows == [{"id": "1", "amount": 10.0}]
-    assert result.rejected_rows == [{"id": "2", "amount": "abc", "_rejected_step": "Change Data Type", "_rejected_column": "amount", "_rejected_reason": "Invalid float value"}]
+    assert result.rejected_rows == [
+        {
+            "id": "2",
+            "amount": "abc",
+            "_rejected_step": "Change Data Type",
+            "_rejected_column": "amount",
+            "_rejected_reason": "Invalid float value",
+            "_original_record": "{\"id\":\"2\",\"amount\":\"abc\"}",
+        }
+    ]
 
 
 def test_filter_like_and_not_like():

@@ -1,5 +1,6 @@
 import json
 from dataclasses import dataclass, field
+from datetime import datetime
 from time import perf_counter
 from typing import Any
 
@@ -14,17 +15,18 @@ STEP_ORDER = {
     "rename": 2,
     "join": 3,
     "cast": 4,
-    "fillna": 5,
-    "derive": 6,
-    "blank_columns": 7,
-    "filter": 8,
-    "value_map": 9,
-    "groupby": 10,
-    "pivot": 11,
-    "custom": 12,
-    "deduplicate": 13,
-    "reorder": 14,
-    "sort": 15,
+    "validate": 5,
+    "fillna": 6,
+    "derive": 7,
+    "blank_columns": 8,
+    "filter": 9,
+    "value_map": 10,
+    "groupby": 11,
+    "pivot": 12,
+    "custom": 13,
+    "deduplicate": 14,
+    "reorder": 15,
+    "sort": 16,
 }
 
 INTERNAL_ROW_ID = "__mobiflow_original_row_id"
@@ -72,6 +74,25 @@ class RejectionHandler:
                     "_rejected_step": step_name,
                     "_rejected_column": column,
                     "_rejected_reason": reason,
+                    "_original_record": json.dumps(original, separators=(",", ":"), default=str),
+                }
+            )
+            self.rows.append(rejected)
+
+    def reject_validation_rows(self, rows: pd.DataFrame, step_name: str, errors_by_index: dict[Any, list[dict[str, str]]]) -> None:
+        for index, raw_row in rows.to_dict(orient="index").items():
+            row = {key: _clean_value(value) for key, value in raw_row.items()}
+            row_id = row.pop(INTERNAL_ROW_ID, None)
+            original = self._original_record(row_id, row)
+            errors = errors_by_index.get(index, [])
+            rejected = dict(original)
+            rejected.update(
+                {
+                    "_rejected_stage": "validation",
+                    "_rejected_step": step_name,
+                    "_rejected_column": ",".join(dict.fromkeys(error["column"] for error in errors)),
+                    "_rejected_reason": "; ".join(error["reason"] for error in errors),
+                    "_rejected_errors": json.dumps(errors, separators=(",", ":"), default=str),
                     "_original_record": json.dumps(original, separators=(",", ":"), default=str),
                 }
             )
@@ -144,6 +165,8 @@ class TransformationExecutor:
             return self.apply_join(df, params)
         if step_type == "cast":
             return self.apply_cast(df, params)
+        if step_type == "validate":
+            return self.apply_validate(df, step)
         if step_type == "fillna":
             return self.apply_fillna(df, params)
         if step_type == "derive":
@@ -221,6 +244,30 @@ class TransformationExecutor:
                 converted = converted.loc[result.index]
             result[column] = converted
         return result
+
+    def apply_validate(self, df: pd.DataFrame, step: dict[str, Any]) -> pd.DataFrame:
+        rules = step["parameters"].get("rules") or step["parameters"].get("validations") or []
+        if not isinstance(rules, list) or not rules:
+            return df
+        errors_by_index: dict[Any, list[dict[str, str]]] = {}
+        for rule in rules:
+            if not isinstance(rule, dict):
+                continue
+            column = str(rule.get("column") or "").strip()
+            rule_type = str(rule.get("type") or rule.get("rule") or "none").strip().lower()
+            if rule_type in {"", "none"}:
+                continue
+            if column not in df.columns:
+                raise ValueError(f"Unknown validation column {column}")
+            for index, value in df[column].items():
+                reason = _validation_error(value, rule_type, rule)
+                if reason:
+                    errors_by_index.setdefault(index, []).append({"column": column, "rule": rule_type, "reason": reason})
+        if not errors_by_index:
+            return df
+        rejected = df.loc[list(errors_by_index.keys())].copy()
+        self.rejections.reject_validation_rows(rejected, step["step_name"], errors_by_index)
+        return df.drop(index=list(errors_by_index.keys())).copy()
 
     def apply_fillna(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
         result = df.copy()
@@ -527,6 +574,7 @@ def human_step_name(step_type: str) -> str:
         "rename": "Rename Columns",
         "join": "Join / Merge",
         "cast": "Change Data Type",
+        "validate": "Validate Rows",
         "fillna": "Fill Null Values",
         "derive": "Add Derived Column",
         "blank_columns": "Add Blank Columns",
@@ -566,6 +614,9 @@ def _referenced_columns(step: dict[str, Any]) -> set[str]:
         return {params.get("left_key")} if params.get("left_key") else set()
     if step["step_type"] == "cast":
         return {item.get("column") for item in params.get("casts", []) if item.get("column")}
+    if step["step_type"] == "validate":
+        rules = params.get("rules") or params.get("validations") or []
+        return {item.get("column") for item in rules if isinstance(item, dict) and item.get("column")}
     if step["step_type"] == "fillna":
         return {item.get("column") for item in params.get("fills", []) if item.get("column")}
     if step["step_type"] == "derive":
@@ -587,6 +638,66 @@ def _referenced_columns(step: dict[str, Any]) -> set[str]:
     if step["step_type"] == "sort":
         return {params.get("column")} if params.get("column") else set()
     return set()
+
+
+def _validation_error(value: Any, rule_type: str, rule: dict[str, Any]) -> str | None:
+    if rule_type == "required":
+        return None if not _is_blank(value) else "Value is required"
+    if rule_type in {"not_blank", "everything_except_blank"}:
+        return None if not _is_blank(value) else "Value must not be blank"
+    if rule_type == "regex":
+        import re
+
+        pattern = str(rule.get("pattern") or rule.get("value") or "")
+        if not pattern:
+            return None
+        text = "" if value is None else str(value)
+        return None if re.fullmatch(pattern, text) else rule.get("message") or f"Value must match {pattern}"
+    if rule_type == "numeric":
+        return None if not _is_blank(value) and pd.notna(pd.to_numeric(value, errors="coerce")) else "Value must be numeric"
+    if rule_type == "decimal":
+        import re
+
+        text = "" if value is None else str(value).strip()
+        return None if re.fullmatch(r"[+-]?\d+(?:\.\d+)?", text) else "Value must be decimal"
+    if rule_type == "integer":
+        import re
+
+        text = "" if value is None else str(value).strip()
+        return None if re.fullmatch(r"[+-]?\d+", text) else "Value must be integer"
+    if rule_type == "date_format":
+        date_format = rule.get("format") or rule.get("value") or "dd/mm/yyyy"
+        try:
+            datetime.strptime(str(value), _strftime_format(date_format))
+            return None
+        except (TypeError, ValueError):
+            return f"Expected date format {date_format}"
+    if rule_type == "max_length":
+        limit = int(rule.get("length") or rule.get("value") or 0)
+        return None if len("" if value is None else str(value)) <= limit else f"Length must be <= {limit}"
+    if rule_type == "min_length":
+        limit = int(rule.get("length") or rule.get("value") or 0)
+        return None if len("" if value is None else str(value)) >= limit else f"Length must be >= {limit}"
+    if rule_type in {"exact_length", "length"}:
+        limit = int(rule.get("length") or rule.get("value") or 0)
+        return None if len("" if value is None else str(value)) == limit else f"Length must be exactly {limit}"
+    if rule_type == "allowed_values":
+        values = rule.get("values")
+        if not isinstance(values, list):
+            values = [item.strip() for item in str(rule.get("value") or "").split(",") if item.strip()]
+        return None if str(value) in {str(item) for item in values} else "Value is not allowed"
+    raise ValueError(f"Unsupported validation rule {rule_type}")
+
+
+def _is_blank(value: Any) -> bool:
+    if value is None:
+        return True
+    try:
+        if pd.isna(value):
+            return True
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip() == ""
 
 
 def _drop_internal_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -695,7 +806,7 @@ DATE_FORMATS = {
 
 
 def _strftime_format(date_format: Any) -> str:
-    normalized = str(date_format).replace("//", "/")
+    normalized = str(date_format).replace("//", "/").lower()
     strftime_format = DATE_FORMATS.get(normalized)
     if not strftime_format:
         raise ValueError(f"Unsupported date format {date_format}")

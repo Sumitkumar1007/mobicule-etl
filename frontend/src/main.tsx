@@ -85,7 +85,7 @@ type User = {
 };
 type AuthSession = { token: string; user: User };
 
-type StepType = "select" | "rename" | "cast" | "fillna" | "derive" | "blank_columns" | "filter" | "deduplicate" | "reorder" | "sort" | "join" | "groupby" | "pivot" | "value_map" | "custom";
+type StepType = "select" | "rename" | "cast" | "validate" | "fillna" | "derive" | "blank_columns" | "filter" | "deduplicate" | "reorder" | "sort" | "join" | "groupby" | "pivot" | "value_map" | "custom";
 type Operand = { kind: "column" | "constant"; value: string };
 type TransformationStep = {
   id: string;
@@ -1366,6 +1366,27 @@ function StepForm({ step, columns, sourceResources, activeSourceResource, onChan
       </div>
     ))}<button className="ghost small" onClick={() => setParams({ casts: [...casts, { column: "", type: "string" }] })}>Add cast</button></div>;
   }
+  if (step.step_type === "validate") {
+    const rules = params.rules as { column: string; type: string; value?: string; pattern?: string; format?: string; values?: string[] }[] ?? [];
+    return <div className="ruleStack">
+      {rules.map((item, idx) => {
+        const ruleType = item.type || "not_blank";
+        return <div className="ruleRow" key={idx}>
+          <ColumnSelect value={item.column} columns={columns} onChange={(value) => setParams({ rules: updateArray(rules, idx, { ...item, column: value }) })} />
+          <select value={ruleType} onChange={(event) => setParams({ rules: updateArray(rules, idx, { ...item, type: event.target.value, value: "", pattern: "", format: "dd/mm/yyyy", values: [] }) })}>
+            {VALIDATION_RULES.map((rule) => <option key={rule.value} value={rule.value}>{rule.label}</option>)}
+          </select>
+          {ruleType === "regex" ? <input value={item.pattern ?? item.value ?? ""} onChange={(event) => setParams({ rules: updateArray(rules, idx, { ...item, pattern: event.target.value }) })} placeholder="^[0-9A-Za-z .,_/-]+$" />
+            : ruleType === "date_format" ? <select value={item.format ?? item.value ?? "dd/mm/yyyy"} onChange={(event) => setParams({ rules: updateArray(rules, idx, { ...item, format: event.target.value }) })}>{DATE_FORMAT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
+              : ["max_length", "min_length", "exact_length"].includes(ruleType) ? <input type="number" value={item.value ?? ""} onChange={(event) => setParams({ rules: updateArray(rules, idx, { ...item, value: event.target.value }) })} placeholder="length" />
+                : ruleType === "allowed_values" ? <input value={Array.isArray(item.values) ? item.values.join(", ") : item.value ?? ""} onChange={(event) => setParams({ rules: updateArray(rules, idx, { ...item, values: csvList(event.target.value), value: event.target.value }) })} placeholder="MH, GJ, KA" />
+                  : <input value="" readOnly placeholder="No value needed" />}
+          <button className="ghost small" onClick={() => setParams({ rules: rules.filter((_, itemIndex) => itemIndex !== idx) })}>Delete</button>
+        </div>;
+      })}
+      <button className="ghost small" onClick={() => setParams({ rules: [...rules, { column: "", type: "not_blank" }] })}>Add validation</button>
+    </div>;
+  }
   if (step.step_type === "join") {
     const sameConnection = String(params.right_source_mode ?? "saved_source") === "same_connection";
     const sameSourceConfig = (params.right_source_config as Record<string, unknown> | undefined) ?? {};
@@ -1817,6 +1838,7 @@ const STEP_TYPES: { type: StepType; label: string; description: string }[] = [
   { type: "rename", label: "Rename Columns", description: "Map source names to destination names" },
   { type: "join", label: "Join / Merge", description: "Merge another datasource by matching keys" },
   { type: "cast", label: "Change Data Type", description: "Convert string, integer, float, date, datetime" },
+  { type: "validate", label: "Validate Rows", description: "Reject bad records by standard rules and continue" },
   { type: "fillna", label: "Fill Null Values", description: "Fixed values, empty string, zero, forward/back fill" },
   { type: "derive", label: "Add Derived Column", description: "Create column with controlled formula builder" },
   { type: "blank_columns", label: "Add Blank Columns", description: "Create required output columns as blank/null/custom" },
@@ -1828,6 +1850,21 @@ const STEP_TYPES: { type: StepType; label: string; description: string }[] = [
   { type: "deduplicate", label: "Remove Duplicates", description: "Drop duplicate rows by subset" },
   { type: "reorder", label: "Reorder Columns", description: "Control final output column order" },
   { type: "sort", label: "Sort Rows", description: "Order output rows" }
+];
+
+const VALIDATION_RULES = [
+  { value: "none", label: "none" },
+  { value: "required", label: "required" },
+  { value: "not_blank", label: "not blank" },
+  { value: "regex", label: "regex" },
+  { value: "numeric", label: "numeric" },
+  { value: "decimal", label: "decimal" },
+  { value: "integer", label: "integer" },
+  { value: "date_format", label: "date format" },
+  { value: "max_length", label: "max length" },
+  { value: "min_length", label: "min length" },
+  { value: "exact_length", label: "exact length" },
+  { value: "allowed_values", label: "allowed values" }
 ];
 
 const FILTER_OPERATORS = [
@@ -1881,6 +1918,7 @@ function emptyStep(stepType: StepType): TransformationStep {
     rename: { mappings: [] },
     join: { right_source_mode: "saved_source", right_source_id: "", right_source_config: {}, join_type: "left", left_key: "", right_key: "", right_columns: [], suffix: "_right" },
     cast: { casts: [] },
+    validate: { rules: [] },
     fillna: { fills: [] },
     derive: { output_column: "", output_type: "float", left: { kind: "column", value: "" }, operator: "+", right: { kind: "constant", value: "" } },
     blank_columns: { columns: "" },

@@ -129,6 +129,90 @@ def test_rejected_rows_keep_original_record_after_column_selection():
     ]
 
 
+def test_validate_step_rejects_bad_rows_and_continues_pipeline():
+    from app.services.transforms import preview_transforms
+
+    rows = [
+        {"id": "A-1", "name": "Ada", "due_date": "27/05/2026"},
+        {"id": "BAD#", "name": "", "due_date": "2026-05-27"},
+    ]
+    result = preview_transforms(
+        rows,
+        [
+            {
+                "id": "validate",
+                "step_type": "validate",
+                "step_name": "Validate Rows",
+                "parameters": {
+                    "rules": [
+                        {"column": "id", "type": "regex", "pattern": "^[0-9A-Za-z-]+$"},
+                        {"column": "name", "type": "not_blank"},
+                        {"column": "due_date", "type": "date_format", "format": "DD/MM/YYYY"},
+                    ]
+                },
+            }
+        ],
+    )
+
+    assert result.rows == [{"id": "A-1", "name": "Ada", "due_date": "27/05/2026"}]
+    assert result.rejected_rows[0]["id"] == "BAD#"
+    assert result.rejected_rows[0]["_rejected_stage"] == "validation"
+    assert result.rejected_rows[0]["_original_record"] == '{"id":"BAD#","name":"","due_date":"2026-05-27"}'
+    assert "id" in result.rejected_rows[0]["_rejected_column"]
+    assert "name" in result.rejected_rows[0]["_rejected_column"]
+    assert "due_date" in result.rejected_rows[0]["_rejected_column"]
+
+
+def test_validate_step_supports_exact_length():
+    from app.services.transforms import preview_transforms
+
+    rows = [{"mobile": "1234567890"}, {"mobile": "12345"}, {"mobile": "12345678901"}]
+    result = preview_transforms(
+        rows,
+        [
+            {
+                "id": "validate",
+                "step_type": "validate",
+                "step_name": "Validate Rows",
+                "parameters": {"rules": [{"column": "mobile", "type": "exact_length", "value": "10"}]},
+            }
+        ],
+    )
+
+    assert result.rows == [{"mobile": "1234567890"}]
+    assert [row["mobile"] for row in result.rejected_rows] == ["12345", "12345678901"]
+    assert all(row["_rejected_reason"] == "Length must be exactly 10" for row in result.rejected_rows)
+
+
+def test_validate_step_supports_numeric_length_and_allowed_values():
+    from app.services.transforms import preview_transforms
+
+    rows = [
+        {"amount": "10.50", "zip": "400001", "state": "MH"},
+        {"amount": "ten", "zip": "4000019", "state": "XX"},
+    ]
+    result = preview_transforms(
+        rows,
+        [
+            {
+                "id": "validate",
+                "step_type": "validate",
+                "step_name": "Validate Rows",
+                "parameters": {
+                    "rules": [
+                        {"column": "amount", "type": "decimal"},
+                        {"column": "zip", "type": "max_length", "value": "6"},
+                        {"column": "state", "type": "allowed_values", "values": ["MH", "GJ"]},
+                    ]
+                },
+            }
+        ],
+    )
+
+    assert result.rows == [{"amount": "10.50", "zip": "400001", "state": "MH"}]
+    assert result.rejected_rows[0]["_rejected_column"] == "amount,zip,state"
+
+
 def test_blank_columns_and_reorder_columns():
     rows = [{"id": "A1", "amount": "10"}]
     result = apply_transforms(

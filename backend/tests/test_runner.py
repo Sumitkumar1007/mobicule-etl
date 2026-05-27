@@ -85,6 +85,28 @@ def test_validate_source_query_blocks_multiple_statements():
         raise AssertionError("Expected multiple statements to fail")
 
 
+def test_rows_payload_csv_uses_union_of_all_columns():
+    from app.services.runner import _rows_payload
+
+    payload = _rows_payload("/out/final.csv", [{"a": "1"}, {"a": "2", "b": "late"}])
+
+    assert payload.decode("utf-8").splitlines()[0] == "a,b"
+
+
+def test_xlsx_from_rows_uses_union_of_all_columns():
+    import io
+
+    from openpyxl import load_workbook
+
+    from app.services.runner import _xlsx_from_rows
+
+    payload = _xlsx_from_rows([{"a": "1"}, {"a": "2", "b": "late"}])
+    workbook = load_workbook(io.BytesIO(payload), read_only=True)
+    headers = [cell.value for cell in next(workbook.active.iter_rows(max_row=1))]
+
+    assert headers == ["a", "b"]
+
+
 def test_rejected_rows_payload_uses_jsonl_for_jsonl_path():
     from app.services.runner import _rows_payload
 

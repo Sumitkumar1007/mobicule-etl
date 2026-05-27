@@ -202,7 +202,7 @@ def load(destination_key: str, config: dict[str, Any], rows: list[dict[str, Any]
             return 0
         exists = path.exists()
         with path.open("a", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
+            writer = csv.DictWriter(handle, fieldnames=_row_columns(rows))
             if not exists:
                 writer.writeheader()
             writer.writerows(rows)
@@ -279,7 +279,7 @@ def _load_sftp(config: dict[str, Any], rows: list[dict[str, Any]]) -> int:
     else:
         output = io.StringIO()
         if rows:
-            writer = csv.DictWriter(output, fieldnames=list(rows[0].keys()))
+            writer = csv.DictWriter(output, fieldnames=_row_columns(rows))
             writer.writeheader()
             writer.writerows(rows)
         payload = output.getvalue()
@@ -311,6 +311,18 @@ def _write_sftp_payload(config: dict[str, Any], remote_path: str, payload: str |
         transport.close()
 
 
+def _row_columns(rows: list[dict[str, Any]]) -> list[str]:
+    columns: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        for key in row.keys():
+            column = str(key)
+            if column not in seen:
+                seen.add(column)
+                columns.append(column)
+    return columns
+
+
 def _rows_payload(path: str, rows: list[dict[str, Any]]) -> bytes:
     if path.endswith(".xlsx"):
         payload = _xlsx_from_rows(rows)
@@ -320,7 +332,7 @@ def _rows_payload(path: str, rows: list[dict[str, Any]]) -> bytes:
     import io
 
     output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=list(rows[0].keys()))
+    writer = csv.DictWriter(output, fieldnames=_row_columns(rows))
     writer.writeheader()
     writer.writerows(rows)
     return output.getvalue().encode("utf-8")
@@ -464,7 +476,7 @@ def _xlsx_from_rows(rows: list[dict[str, Any]]) -> bytes:
     workbook = Workbook()
     sheet = workbook.active
     if rows:
-        headers = list(rows[0].keys())
+        headers = _row_columns(rows)
         sheet.append(headers)
         for row in rows:
             sheet.append([row.get(header) for header in headers])

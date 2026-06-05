@@ -1012,6 +1012,68 @@ textarea {
   word-break: break-all;
 }
 
+.auditTableWrap {
+  max-height: 620px;
+  overflow: auto;
+  border: 1px solid #dce4df;
+  border-radius: 8px;
+  margin-top: 12px;
+}
+
+.auditTable {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.auditTable th,
+.auditTable td {
+  border-bottom: 1px solid #dce4df;
+  padding: 8px 10px;
+  text-align: left;
+  white-space: nowrap;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.auditTable th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #e4ebe7;
+  color: #253348;
+  font-weight: 900;
+}
+
+.auditTable tbody tr {
+  cursor: pointer;
+}
+
+.auditTable tbody tr:hover,
+.auditTable tbody tr.selected {
+  background: #eef7ee;
+}
+
+.auditDetails {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #dce4df;
+  border-radius: 8px;
+  background: #fbfdfb;
+  font-size: 12px;
+}
+
+.auditDetails strong,
+.auditDetails span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .executionSummary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

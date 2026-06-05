@@ -170,6 +170,7 @@ function App() {
   const [auditLogs, setAuditLogs] = useState<EtlAuditLog[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [selectedRun, setSelectedRun] = useState<number | null>(null);
+  const [selectedAuditId, setSelectedAuditId] = useState<number | null>(null);
   const [toast, setToast] = useState<Toast>(null);
   const [activeMenu, setActiveMenu] = useState<Menu>("datasources");
   const [showPasswordPanel, setShowPasswordPanel] = useState(false);
@@ -233,6 +234,7 @@ function App() {
     [pipelines, runs]
   );
   const selectedTransformationVersions = transformationVersions.filter((item) => String(item.transformation_id) === form.transformation_id);
+  const selectedAuditLog = auditLogs.find((item) => item.id === selectedAuditId) ?? auditLogs[0];
 
   async function refresh() {
     const [connectorData, sourceData, destinationData, pipelineData, transformationData, transformationVersionData, runData, auditData, userData] = await Promise.all([
@@ -1042,24 +1044,71 @@ function App() {
               <h2>ETL Audit Log</h2>
             </div>
           </div>
-          <div className="table">
-            {auditLogs.map((item) => (
-              <div className="row" key={item.id}>
-                <span>#{item.run_id ?? item.id}</span>
-                <strong>{item.pipeline_name || "Pipeline"}</strong>
-                <Status status={item.status as Run["status"]} />
-                <span>{item.job_type || "-"}</span>
-                <span>{item.current_stage || "-"}</span>
-                <span>{item.success_count}/{item.total_count} ok</span>
-                <span>{item.rejected_count} rejected</span>
-                <span>{item.duration_seconds ?? "-"} sec</span>
-                <span>{item.source_path || "-"}</span>
-                <span>{item.target_path || "-"}</span>
-                <span>{item.error_file_path || item.error_message || "-"}</span>
-              </div>
-            ))}
+          <div className="auditTableWrap">
+            <table className="auditTable">
+              <thead>
+                <tr>
+                  <th>id</th>
+                  <th>run_id</th>
+                  <th>pipeline_name</th>
+                  <th>job_type</th>
+                  <th>start_time</th>
+                  <th>end_time</th>
+                  <th>duration_seconds</th>
+                  <th>status</th>
+                  <th>current_stage</th>
+                  <th>failed_stage</th>
+                  <th>source_path</th>
+                  <th>target_path</th>
+                  <th>total_count</th>
+                  <th>success_count</th>
+                  <th>failed_count</th>
+                  <th>rejected_count</th>
+                  <th>error_message</th>
+                  <th>error_file_path</th>
+                  <th>triggered_by</th>
+                  <th>created_date</th>
+                  <th>last_modified_date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {auditLogs.map((item) => (
+                  <tr key={item.id} className={selectedAuditLog?.id === item.id ? "selected" : ""} onClick={() => setSelectedAuditId(item.id)}>
+                    <td>{item.id}</td>
+                    <td>{item.run_id ?? "-"}</td>
+                    <td>{item.pipeline_name || "-"}</td>
+                    <td>{item.job_type || "-"}</td>
+                    <td>{item.start_time || "-"}</td>
+                    <td>{item.end_time || "-"}</td>
+                    <td>{item.duration_seconds ?? "-"}</td>
+                    <td><Status status={item.status as Run["status"]} /></td>
+                    <td>{item.current_stage || "-"}</td>
+                    <td>{item.failed_stage || "-"}</td>
+                    <td>{item.source_path || "-"}</td>
+                    <td>{item.target_path || "-"}</td>
+                    <td>{item.total_count}</td>
+                    <td>{item.success_count}</td>
+                    <td>{item.failed_count}</td>
+                    <td>{item.rejected_count}</td>
+                    <td>{item.error_message || "-"}</td>
+                    <td>{item.error_file_path || "-"}</td>
+                    <td>{item.triggered_by || "-"}</td>
+                    <td>{item.created_date}</td>
+                    <td>{item.last_modified_date}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
             {auditLogs.length === 0 && <p className="emptyState">No ETL audit logs.</p>}
           </div>
+          {selectedAuditLog && <div className="auditDetails">
+            <strong>Selected run #{selectedAuditLog.run_id ?? selectedAuditLog.id}</strong>
+            <span>Stage: {selectedAuditLog.current_stage || "-"}</span>
+            <span>Source: {selectedAuditLog.source_path || "-"}</span>
+            <span>Target: {selectedAuditLog.target_path || "-"}</span>
+            <span>Error file: {selectedAuditLog.error_file_path || "-"}</span>
+            <span>Error: {selectedAuditLog.error_message || "-"}</span>
+          </div>}
         </section>}
 
         {activeMenu === "access" && <>

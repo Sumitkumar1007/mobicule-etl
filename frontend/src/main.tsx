@@ -63,6 +63,30 @@ type RunLog = {
   created_at: string;
 };
 
+type EtlAuditLog = {
+  id: number;
+  run_id?: number | null;
+  pipeline_name?: string | null;
+  job_type?: string | null;
+  start_time?: string | null;
+  end_time?: string | null;
+  duration_seconds?: number | null;
+  status: string;
+  current_stage?: string | null;
+  failed_stage?: string | null;
+  source_path?: string | null;
+  target_path?: string | null;
+  total_count: number;
+  success_count: number;
+  failed_count: number;
+  rejected_count: number;
+  error_message?: string | null;
+  error_file_path?: string | null;
+  triggered_by?: string | null;
+  created_date: string;
+  last_modified_date: string;
+};
+
 type Resource = {
   id: number;
   name: string;
@@ -129,7 +153,7 @@ type TransformationPreview = {
 };
 type ValidationResult = { errors: string[]; warnings: string[] };
 type Toast = { tone: "ok" | "bad"; text: string } | null;
-type Menu = "datasources" | "destinations" | "transforms" | "pipelines" | "runs" | "access";
+type Menu = "datasources" | "destinations" | "transforms" | "pipelines" | "runs" | "audit" | "access";
 
 function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(() => loadSession()?.user ?? null);
@@ -143,6 +167,7 @@ function App() {
   const [transformationVersions, setTransformationVersions] = useState<TransformationVersion[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
   const [logs, setLogs] = useState<RunLog[]>([]);
+  const [auditLogs, setAuditLogs] = useState<EtlAuditLog[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [selectedRun, setSelectedRun] = useState<number | null>(null);
   const [toast, setToast] = useState<Toast>(null);
@@ -210,7 +235,7 @@ function App() {
   const selectedTransformationVersions = transformationVersions.filter((item) => String(item.transformation_id) === form.transformation_id);
 
   async function refresh() {
-    const [connectorData, sourceData, destinationData, pipelineData, transformationData, transformationVersionData, runData, userData] = await Promise.all([
+    const [connectorData, sourceData, destinationData, pipelineData, transformationData, transformationVersionData, runData, auditData, userData] = await Promise.all([
       api<Connector[]>("/connectors"),
       api<Resource[]>("/sources"),
       api<Resource[]>("/destinations"),
@@ -218,6 +243,7 @@ function App() {
       api<Transformation[]>("/transformations"),
       api<TransformationVersion[]>("/transformation-versions"),
       api<Run[]>("/runs"),
+      canRun ? api<EtlAuditLog[]>("/etl-audit-logs") : Promise.resolve([]),
       isAdmin ? api<User[]>("/users") : Promise.resolve([])
     ]);
     setConnectors(connectorData);
@@ -227,6 +253,7 @@ function App() {
     setTransformations(transformationData);
     setTransformationVersions(transformationVersionData);
     setRuns(runData);
+    setAuditLogs(auditData);
     setUsers(userData);
     setForm((current) => ({
       ...current,
@@ -260,6 +287,9 @@ function App() {
 
   useEffect(() => {
     if (currentUser && currentUser.role !== "admin" && activeMenu === "access") {
+      setActiveMenu("datasources");
+    }
+    if (currentUser && !["admin", "support"].includes(currentUser.role) && activeMenu === "audit") {
       setActiveMenu("datasources");
     }
   }, [currentUser, activeMenu]);
@@ -654,6 +684,7 @@ function App() {
           <button className={activeMenu === "transforms" ? "active" : ""} onClick={() => setActiveMenu("transforms")}>Transform</button>
           <button className={activeMenu === "pipelines" ? "active" : ""} onClick={() => setActiveMenu("pipelines")}>Pipelines</button>
           <button className={activeMenu === "runs" ? "active" : ""} onClick={() => setActiveMenu("runs")}>Runs & Logs</button>
+          {canRun && <button className={activeMenu === "audit" ? "active" : ""} onClick={() => setActiveMenu("audit")}>ETL Audit</button>}
           {isAdmin && <button className={activeMenu === "access" ? "active" : ""} onClick={() => setActiveMenu("access")}>Access Control</button>}
         </nav>
         <div className="railFooter">
@@ -1004,6 +1035,33 @@ function App() {
           </div>
         </section>}
 
+        {canRun && activeMenu === "audit" && <section className="panel">
+          <div className="panelHead">
+            <div>
+              <p className="eyebrow">ETL Pipeline Audit</p>
+              <h2>ETL Audit Log</h2>
+            </div>
+          </div>
+          <div className="table">
+            {auditLogs.map((item) => (
+              <div className="row" key={item.id}>
+                <span>#{item.run_id ?? item.id}</span>
+                <strong>{item.pipeline_name || "Pipeline"}</strong>
+                <Status status={item.status as Run["status"]} />
+                <span>{item.job_type || "-"}</span>
+                <span>{item.current_stage || "-"}</span>
+                <span>{item.success_count}/{item.total_count} ok</span>
+                <span>{item.rejected_count} rejected</span>
+                <span>{item.duration_seconds ?? "-"} sec</span>
+                <span>{item.source_path || "-"}</span>
+                <span>{item.target_path || "-"}</span>
+                <span>{item.error_file_path || item.error_message || "-"}</span>
+              </div>
+            ))}
+            {auditLogs.length === 0 && <p className="emptyState">No ETL audit logs.</p>}
+          </div>
+        </section>}
+
         {activeMenu === "access" && <>
         <section className="panel accountSummaryPanel">
           <div className="panelHead">
@@ -1168,9 +1226,11 @@ function DatasetTargetEditor({ title, resource, value, options, onChange }: { ti
   }
   if (resource.connector_key === "sftp_source") {
     const fileOptions = sftpPathOptions(resource, options.paths, String(value.remote_path ?? ""));
-    const isXlsx = String(value.format ?? "csv") === "xlsx" || String(value.remote_path ?? "").endsWith(".xlsx");
+    const selectedPath = String(value.remote_path || value.path_pattern || "");
+    const isXlsx = String(value.format ?? "csv") === "xlsx" || selectedPath.endsWith(".xlsx");
     return <div className="formGrid two">
-      <label>{title} file path<SelectOrInput value={String(value.remote_path ?? "")} options={fileOptions} placeholder="customers.csv" onChange={(next) => onChange({ ...value, remote_path: next, sheet_name: "" })} /></label>
+      <label>{title} file path<SelectOrInput value={String(value.remote_path ?? "")} options={fileOptions} placeholder="/in/customers.csv" onChange={(next) => onChange({ ...value, remote_path: next, path_pattern: "", sheet_name: "" })} /></label>
+      <label>Date file pattern<input value={String(value.path_pattern ?? "")} onChange={(event) => onChange({ ...value, path_pattern: event.target.value, remote_path: "", sheet_name: "" })} placeholder="/in/customers_{YYYY}{MM}{DD}.csv" />{Boolean(value.path_pattern) && <PatternPreview pattern={String(value.path_pattern)} />}</label>
       <label>{title} format<select value={String(value.format ?? "csv")} onChange={(event) => onChange({ ...value, format: event.target.value, sheet_name: "" })}><option value="csv">csv</option><option value="xlsx">xlsx</option></select></label>
       {isXlsx && options.sheets.length > 1 && <label>Sheet<select value={String(value.sheet_name ?? "")} onChange={(event) => onChange({ ...value, sheet_name: event.target.value })}><option value="">First sheet</option>{options.sheets.map((sheet) => <option key={sheet} value={sheet}>{sheet}</option>)}</select></label>}
     </div>;
@@ -1185,12 +1245,22 @@ function DatasetTargetEditor({ title, resource, value, options, onChange }: { ti
   }
   if (resource.connector_key === "sftp_destination") {
     const fileOptions = sftpPathOptions(resource, options.paths, String(value.remote_path ?? ""));
+    const isXlsx = String(value.format ?? "csv") === "xlsx" || String(value.remote_path || value.output_path_pattern || "").endsWith(".xlsx");
     return <div className="formGrid two">
-      <label>{title} output path<SelectOrInput value={String(value.remote_path ?? "")} options={fileOptions} placeholder="result.csv" onChange={(next) => onChange({ ...value, remote_path: next })} /></label>
+      <label>{title} output path<SelectOrInput value={String(value.remote_path ?? "")} options={fileOptions} placeholder="/out/result.csv" onChange={(next) => onChange({ ...value, remote_path: next, output_path_pattern: "" })} /></label>
+      <label>Output date pattern<input value={String(value.output_path_pattern ?? "")} onChange={(event) => onChange({ ...value, output_path_pattern: event.target.value, remote_path: "" })} placeholder="/out/result_{YYYY}{MM}{DD}.xlsx" />{Boolean(value.output_path_pattern) && <PatternPreview pattern={String(value.output_path_pattern)} />}</label>
+      <label>Rejected/error path<input value={String(value.rejected_path ?? "")} onChange={(event) => onChange({ ...value, rejected_path: event.target.value, rejected_path_pattern: "" })} placeholder="/err/rejected.csv" /></label>
+      <label>Rejected/error pattern<input value={String(value.rejected_path_pattern ?? "")} onChange={(event) => onChange({ ...value, rejected_path_pattern: event.target.value, rejected_path: "" })} placeholder="/err/rejected_{YYYY}{MM}{DD}_{timestamp}.csv" />{Boolean(value.rejected_path_pattern) && <PatternPreview pattern={String(value.rejected_path_pattern)} />}</label>
       <label>{title} format<select value={String(value.format ?? "csv")} onChange={(event) => onChange({ ...value, format: event.target.value })}><option value="csv">csv</option><option value="xlsx">xlsx</option></select></label>
+      {isXlsx && <label>Data sheet<input value={String(value.xlsx_data_sheet ?? "Data")} onChange={(event) => onChange({ ...value, xlsx_data_sheet: event.target.value })} placeholder="Data" /></label>}
     </div>;
   }
   return null;
+}
+
+function PatternPreview({ pattern }: { pattern: string }) {
+  const resolved = formatDatePattern(pattern);
+  return <span className="patternPreview">Resolved today: {resolved}</span>;
 }
 
 function SelectOrInput({ value, options, placeholder, onChange }: { value: string; options: Array<string | { label: string; value: string }>; placeholder: string; onChange: (value: string) => void }) {
@@ -1897,7 +1967,7 @@ const DATE_FORMAT_OPTIONS = [
   { value: "yy/mm/dd", label: "yy/mm/dd" },
 ];
 const AGG_FUNCS = ["sum", "mean", "min", "max", "count", "count_distinct", "first", "last"];
-const CONNECTION_TARGET_FIELDS = new Set(["schema", "table", "query", "path_pattern", "output_path_pattern", "operation", "format", "mode", "primary_key"]);
+const CONNECTION_TARGET_FIELDS = new Set(["schema", "table", "query", "path_pattern", "output_path_pattern", "rejected_path", "rejected_path_pattern", "operation", "format", "mode", "primary_key", "xlsx_data_sheet"]);
 
 function defaultSteps(): TransformationStep[] {
   return [
@@ -2180,6 +2250,22 @@ function sampleConfigForKey(key: string) {
   }, null, 2);
 }
 
+function formatDatePattern(pattern: string) {
+  const now = new Date();
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const values: Record<string, string> = {
+    YYYY: String(now.getUTCFullYear()),
+    YY: String(now.getUTCFullYear()).slice(-2),
+    MM: pad(now.getUTCMonth() + 1),
+    DD: pad(now.getUTCDate()),
+    hh: pad(now.getUTCHours()),
+    mm: pad(now.getUTCMinutes()),
+    ss: pad(now.getUTCSeconds()),
+  };
+  values.timestamp = `${values.YYYY}${values.MM}${values.DD}${values.hh}${values.mm}${values.ss}`;
+  return pattern.replace(/\{(YYYY|YY|MM|DD|hh|mm|ss|timestamp)\}/g, (_match, token: string) => values[token] ?? _match);
+}
+
 function makeId() {
   if (globalThis.crypto && "randomUUID" in globalThis.crypto) {
     return globalThis.crypto.randomUUID();
@@ -2212,7 +2298,7 @@ function placeholderFor(key: string, schema: SchemaProperty) {
 
 function canLoadColumns(connectorKey: string, config: Record<string, unknown>) {
   if (connectorKey === "postgres_source") return Boolean(config.query || config.table);
-  if (connectorKey === "sftp_source") return Boolean(config.remote_path);
+  if (connectorKey === "sftp_source") return Boolean(config.remote_path || config.path_pattern);
   if (connectorKey === "postgres_destination") return Boolean(config.table);
   if (connectorKey === "sftp_destination") return Boolean(config.remote_path || config.output_path_pattern);
   return true;

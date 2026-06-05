@@ -59,7 +59,7 @@ def run_due_pipelines(now: datetime | None = None) -> list[int]:
             if run_key in _last_run_keys:
                 continue
             if _cron_matches(schedule, current):
-                enqueue_run(pipeline_id)
+                enqueue_run(pipeline_id, job_type="scheduled", triggered_by="scheduler")
                 _last_run_keys.add(run_key)
                 due_ids.append(pipeline_id)
                 logger.info("Scheduled pipeline %s from cron %s", pipeline_id, schedule)

@@ -179,6 +179,31 @@ def init_db() -> None:
                 details TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+
+
+            CREATE TABLE IF NOT EXISTS etl_audit_log (
+                id SERIAL PRIMARY KEY,
+                run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+                pipeline_name TEXT,
+                job_type TEXT,
+                start_time TEXT,
+                end_time TEXT,
+                duration_seconds REAL,
+                status TEXT NOT NULL DEFAULT 'queued',
+                current_stage TEXT,
+                failed_stage TEXT,
+                source_path TEXT,
+                target_path TEXT,
+                total_count INTEGER NOT NULL DEFAULT 0,
+                success_count INTEGER NOT NULL DEFAULT 0,
+                failed_count INTEGER NOT NULL DEFAULT 0,
+                rejected_count INTEGER NOT NULL DEFAULT 0,
+                error_message TEXT,
+                error_file_path TEXT,
+                triggered_by TEXT,
+                created_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                last_modified_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             """
         )
         conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT")
@@ -188,6 +213,26 @@ def init_db() -> None:
         conn.execute("ALTER TABLE pipelines ADD COLUMN IF NOT EXISTS transformation_version INTEGER")
         conn.execute("ALTER TABLE transformations ADD COLUMN IF NOT EXISTS source_config TEXT NOT NULL DEFAULT '{}'")
         conn.execute("ALTER TABLE transformations ADD COLUMN IF NOT EXISTS destination_config TEXT NOT NULL DEFAULT '{}'")
+        conn.execute("ALTER TABLE etl_audit_log ADD COLUMN IF NOT EXISTS run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL")
+        conn.execute("ALTER TABLE etl_audit_log ADD COLUMN IF NOT EXISTS pipeline_name TEXT")
+        conn.execute("ALTER TABLE etl_audit_log ADD COLUMN IF NOT EXISTS job_type TEXT")
+        conn.execute("ALTER TABLE etl_audit_log ADD COLUMN IF NOT EXISTS start_time TEXT")
+        conn.execute("ALTER TABLE etl_audit_log ADD COLUMN IF NOT EXISTS end_time TEXT")
+        conn.execute("ALTER TABLE etl_audit_log ADD COLUMN IF NOT EXISTS duration_seconds REAL")
+        conn.execute("ALTER TABLE etl_audit_log ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'queued'")
+        conn.execute("ALTER TABLE etl_audit_log ADD COLUMN IF NOT EXISTS current_stage TEXT")
+        conn.execute("ALTER TABLE etl_audit_log ADD COLUMN IF NOT EXISTS failed_stage TEXT")
+        conn.execute("ALTER TABLE etl_audit_log ADD COLUMN IF NOT EXISTS source_path TEXT")
+        conn.execute("ALTER TABLE etl_audit_log ADD COLUMN IF NOT EXISTS target_path TEXT")
+        conn.execute("ALTER TABLE etl_audit_log ADD COLUMN IF NOT EXISTS total_count INTEGER NOT NULL DEFAULT 0")
+        conn.execute("ALTER TABLE etl_audit_log ADD COLUMN IF NOT EXISTS success_count INTEGER NOT NULL DEFAULT 0")
+        conn.execute("ALTER TABLE etl_audit_log ADD COLUMN IF NOT EXISTS failed_count INTEGER NOT NULL DEFAULT 0")
+        conn.execute("ALTER TABLE etl_audit_log ADD COLUMN IF NOT EXISTS rejected_count INTEGER NOT NULL DEFAULT 0")
+        conn.execute("ALTER TABLE etl_audit_log ADD COLUMN IF NOT EXISTS error_message TEXT")
+        conn.execute("ALTER TABLE etl_audit_log ADD COLUMN IF NOT EXISTS error_file_path TEXT")
+        conn.execute("ALTER TABLE etl_audit_log ADD COLUMN IF NOT EXISTS triggered_by TEXT")
+        conn.execute("ALTER TABLE etl_audit_log ADD COLUMN IF NOT EXISTS created_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP")
+        conn.execute("ALTER TABLE etl_audit_log ADD COLUMN IF NOT EXISTS last_modified_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP")
         settings = get_settings()
         bootstrap_hash = hash_password(settings.bootstrap_admin_password) if settings.bootstrap_admin_password else None
         conn.execute(

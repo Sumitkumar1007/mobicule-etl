@@ -24,14 +24,14 @@ class RunStopped(RuntimeError):
     pass
 
 
-def enqueue_run(pipeline_id: int) -> int:
+def enqueue_run(pipeline_id: int, job_type: str = "manual", triggered_by: str = "system") -> int:
     with db() as conn:
         row = conn.execute(
             "INSERT INTO runs (pipeline_id, status) VALUES (?, 'queued') RETURNING id",
             (pipeline_id,),
         ).fetchone()
         run_id = int(dict(row)["id"])
-    executor.submit(run_pipeline, run_id)
+    executor.submit(run_pipeline, run_id, job_type, triggered_by)
     return run_id
 
 
@@ -40,23 +40,28 @@ def preview(source_key: str, source_config: dict[str, Any], transforms: list[dic
     return preview_transforms(rows[:25], prepare_runtime_transforms(transforms, source_key, source_config)).rows[:25]
 
 
-def run_pipeline(run_id: int) -> None:
+def run_pipeline(run_id: int, job_type: str = "manual", triggered_by: str = "system") -> None:
     try:
         pipeline = _load_pipeline(run_id)
         if not _mark_running(run_id):
             _log(run_id, "INFO", "Run was stopped before it started")
             return
         _log(run_id, "INFO", f"Run started for pipeline {pipeline['name']}")
+        _etl_audit_start(run_id, pipeline, job_type, triggered_by)
+        _etl_audit_stage(run_id, "extract", source_path=_source_path(pipeline["source_key"], pipeline["source_config"]))
         rows = extract(pipeline["source_key"], pipeline["source_config"])
         _ensure_running(run_id)
         _update_counts(run_id, rows_read=len(rows))
+        _etl_audit_stage(run_id, "transform", total_count=len(rows), source_path=_source_path(pipeline["source_key"], pipeline["source_config"], rows))
         _log(run_id, "INFO", f"Extracted {len(rows)} rows")
         result = preview_transforms(rows, prepare_runtime_transforms(pipeline["transforms"], pipeline["source_key"], pipeline["source_config"]))
         _ensure_running(run_id)
         rows = result.rows
+        _etl_audit_stage(run_id, "reject", rejected_count=len(result.rejected_rows), failed_count=len(result.rejected_rows))
         rejected_path = save_rejected_records(pipeline["destination_key"], pipeline["destination_config"], result.rejected_rows)
         if rejected_path:
             _log(run_id, "WARNING", f"Rejected records saved: {rejected_path} ({len(result.rejected_rows)} rows)")
+            _etl_audit_stage(run_id, "reject", error_file_path=rejected_path)
         for step_log in result.logs:
             _log(run_id, step_log.level, step_log.message)
             _transformation_log(run_id, step_log)
@@ -64,16 +69,19 @@ def run_pipeline(run_id: int) -> None:
             _log(run_id, "WARNING", warning)
         _log(run_id, "INFO", f"Final output rows: {len(rows)}")
         _ensure_running(run_id)
+        _etl_audit_stage(run_id, "load", target_path=_target_path(pipeline["destination_key"], pipeline["destination_config"]))
         written = load(pipeline["destination_key"], pipeline["destination_config"], rows)
         _ensure_running(run_id)
         _succeed(run_id, written)
         _log(run_id, "INFO", f"Run succeeded, wrote {written} rows")
+        _etl_audit_finish(run_id, "succeeded", success_count=written)
     except RunStopped as exc:
         _log(run_id, "INFO", str(exc))
     except Exception as exc:
         logger.exception("Pipeline run failed")
         _fail(run_id, str(exc))
         _log(run_id, "ERROR", str(exc))
+        _etl_audit_fail(run_id, str(exc))
 
 
 def extract(source_key: str, config: dict[str, Any]) -> list[dict[str, Any]]:
@@ -172,14 +180,14 @@ def save_rejected_records(destination_key: str, config: dict[str, Any], rows: li
     if not rows:
         return None
     if destination_key == "sftp_destination":
-        remote_path = _rejected_output_path(_sftp_write_path(config))
+        remote_path = _rejected_write_path(config, _sftp_write_path(config))
         _write_sftp_rows(config, remote_path, rows)
         return remote_path
     if destination_key in {"csv_output", "jsonl_file"}:
-        output_path = Path(config.get("path", "data/output.csv"))
-        rejected_path = Path(_rejected_output_path(str(output_path)))
+        output_path = str(config.get("path", "data/output.csv"))
+        rejected_path = Path(_rejected_write_path(config, output_path))
         rejected_path.parent.mkdir(parents=True, exist_ok=True)
-        rejected_path.write_bytes(_rows_payload(str(rejected_path), rows))
+        rejected_path.write_bytes(_rows_payload(str(rejected_path), rows, config))
         return str(rejected_path)
     return None
 
@@ -275,7 +283,7 @@ def _load_sftp(config: dict[str, Any], rows: list[dict[str, Any]]) -> int:
         raise RuntimeError("paramiko is required for SFTP destination. Install backend requirements.") from exc
     remote_path = _sftp_write_path(config)
     if config.get("format") == "xlsx" or remote_path.endswith(".xlsx"):
-        payload: str | bytes = _xlsx_from_rows(rows)
+        payload: str | bytes = _xlsx_from_rows(rows, config)
     else:
         output = io.StringIO()
         if rows:
@@ -288,7 +296,7 @@ def _load_sftp(config: dict[str, Any], rows: list[dict[str, Any]]) -> int:
 
 
 def _write_sftp_rows(config: dict[str, Any], remote_path: str, rows: list[dict[str, Any]]) -> None:
-    _write_sftp_payload(config, remote_path, _rows_payload(remote_path, rows))
+    _write_sftp_payload(config, remote_path, _rows_payload(remote_path, rows, config))
 
 
 def _write_sftp_payload(config: dict[str, Any], remote_path: str, payload: str | bytes) -> None:
@@ -323,9 +331,9 @@ def _row_columns(rows: list[dict[str, Any]]) -> list[str]:
     return columns
 
 
-def _rows_payload(path: str, rows: list[dict[str, Any]]) -> bytes:
+def _rows_payload(path: str, rows: list[dict[str, Any]], config: dict[str, Any] | None = None) -> bytes:
     if path.endswith(".xlsx"):
-        payload = _xlsx_from_rows(rows)
+        payload = _xlsx_from_rows(rows, config)
         return payload if isinstance(payload, bytes) else payload.encode("utf-8")
     if path.endswith(".jsonl"):
         return "".join(json.dumps(row, default=str) + "\n" for row in rows).encode("utf-8")
@@ -405,12 +413,13 @@ def _resolve_sftp_join_path(base_remote_path: str, candidate: str) -> str:
 
 
 def _sftp_read_paths(client, config: dict[str, Any]) -> list[str]:
-    remote_path = config.get("remote_path")
+    remote_path = str(config.get("remote_path") or "").strip()
     if remote_path:
-        return [remote_path]
-    pattern = config.get("path_pattern")
+        return [_format_path_pattern(remote_path)]
+    pattern = str(config.get("path_pattern") or "").strip()
     if not pattern:
         raise ValueError("SFTP source needs remote path")
+    pattern = _format_path_pattern(pattern)
     if not any(char in pattern for char in "*?[]"):
         return [pattern]
     directory = posixpath.dirname(pattern) or "."
@@ -421,7 +430,9 @@ def _sftp_read_paths(client, config: dict[str, Any]) -> list[str]:
 def _sftp_write_path(config: dict[str, Any]) -> str:
     remote_path = str(config.get("remote_path") or "").strip()
     pattern = str(config.get("output_path_pattern") or "").strip()
-    if not remote_path and pattern:
+    if remote_path:
+        remote_path = _format_path_pattern(remote_path)
+    elif pattern:
         remote_path = _format_path_pattern(pattern)
     if not remote_path:
         raise ValueError("SFTP destination needs output path")
@@ -437,6 +448,16 @@ def _rejected_output_path(output_path: str) -> str:
         stem, ext = posixpath.splitext(output_path)
         return f"{stem}_rejected_{timestamp}{ext}"
     return posixpath.join(output_path, f"rejected_{timestamp}.csv")
+
+
+def _rejected_write_path(config: dict[str, Any], output_path: str) -> str:
+    explicit = str(config.get("rejected_path") or config.get("error_path") or "").strip()
+    pattern = str(config.get("rejected_path_pattern") or config.get("error_path_pattern") or "").strip()
+    if explicit:
+        return _format_path_pattern(explicit)
+    if pattern:
+        return _format_path_pattern(pattern)
+    return _rejected_output_path(output_path)
 
 
 def _format_path_pattern(pattern: str) -> str:
@@ -468,13 +489,15 @@ def _rows_from_xlsx(content: bytes, sheet_name: Any = None) -> list[dict[str, An
     return [{headers[index]: value for index, value in enumerate(row)} for row in rows[1:]]
 
 
-def _xlsx_from_rows(rows: list[dict[str, Any]]) -> bytes:
+def _xlsx_from_rows(rows: list[dict[str, Any]], config: dict[str, Any] | None = None) -> bytes:
     import io
 
     from openpyxl import Workbook
 
+    config = config or {}
     workbook = Workbook()
     sheet = workbook.active
+    sheet.title = _xlsx_title(str(config.get("xlsx_data_sheet") or "Data"))
     if rows:
         headers = _row_columns(rows)
         sheet.append(headers)
@@ -487,6 +510,11 @@ def _xlsx_from_rows(rows: list[dict[str, Any]]) -> bytes:
     output = io.BytesIO()
     workbook.save(output)
     return output.getvalue()
+
+
+def _xlsx_title(value: str) -> str:
+    cleaned = "".join(char for char in value if char not in "[]:*?/\\")[:31].strip()
+    return cleaned or "Sheet1"
 
 
 def _load_pipeline(run_id: int) -> dict[str, Any]:
@@ -608,6 +636,131 @@ def _fail(run_id: int, error: str) -> None:
             "UPDATE runs SET status='failed', error=?, finished_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('queued', 'running')",
             (error, run_id),
         )
+
+
+def _etl_audit_start(run_id: int, pipeline: dict[str, Any], job_type: str, triggered_by: str) -> None:
+    now = datetime.now(UTC).isoformat()
+    with db() as conn:
+        conn.execute(
+            """
+            INSERT INTO etl_audit_log
+            (run_id, pipeline_name, job_type, start_time, status, current_stage, source_path, target_path, triggered_by, created_date, last_modified_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                run_id,
+                pipeline.get("name"),
+                job_type,
+                now,
+                "running",
+                "started",
+                _source_path(pipeline["source_key"], pipeline["source_config"]),
+                _target_path(pipeline["destination_key"], pipeline["destination_config"]),
+                triggered_by,
+                now,
+                now,
+            ),
+        )
+
+
+def _etl_audit_stage(run_id: int, stage: str, **fields: object) -> None:
+    _etl_audit_update(run_id, current_stage=stage, **fields)
+
+
+def _etl_audit_finish(run_id: int, status: str, **fields: object) -> None:
+    end_time = datetime.now(UTC).isoformat()
+    start_time = _etl_audit_start_time(run_id)
+    duration = _duration_seconds(start_time, end_time)
+    _etl_audit_update(run_id, status=status, current_stage="completed", end_time=end_time, duration_seconds=duration, **fields)
+
+
+def _etl_audit_fail(run_id: int, error: str) -> None:
+    stage = _etl_audit_current_stage(run_id) or "unknown"
+    end_time = datetime.now(UTC).isoformat()
+    start_time = _etl_audit_start_time(run_id)
+    duration = _duration_seconds(start_time, end_time)
+    _etl_audit_update(run_id, status="failed", current_stage="failed", failed_stage=stage, end_time=end_time, duration_seconds=duration, error_message=error)
+
+
+def mark_run_stopped_audit(run_id: int, triggered_by: str) -> None:
+    stage = _etl_audit_current_stage(run_id) or "stopped"
+    end_time = datetime.now(UTC).isoformat()
+    start_time = _etl_audit_start_time(run_id)
+    duration = _duration_seconds(start_time, end_time)
+    _etl_audit_update(
+        run_id,
+        status="stopped",
+        current_stage="stopped",
+        failed_stage=stage,
+        end_time=end_time,
+        duration_seconds=duration,
+        error_message=f"Stopped by {triggered_by}",
+    )
+
+
+def _etl_audit_update(run_id: int, **fields: object) -> None:
+    allowed = {
+        "status", "current_stage", "failed_stage", "source_path", "target_path", "total_count", "success_count",
+        "failed_count", "rejected_count", "error_message", "error_file_path", "end_time", "duration_seconds",
+    }
+    updates = {key: value for key, value in fields.items() if key in allowed}
+    if not updates:
+        return
+    updates["last_modified_date"] = datetime.now(UTC).isoformat()
+    assignments = ", ".join(f"{key}=?" for key in updates)
+    values = tuple(updates.values()) + (run_id,)
+    with db() as conn:
+        conn.execute(f"UPDATE etl_audit_log SET {assignments} WHERE run_id=?", values)
+
+
+def _etl_audit_start_time(run_id: int) -> str | None:
+    with db() as conn:
+        row = conn.execute("SELECT start_time FROM etl_audit_log WHERE run_id=? ORDER BY id DESC LIMIT 1", (run_id,)).fetchone()
+    return str(dict(row).get("start_time")) if row and dict(row).get("start_time") else None
+
+
+def _etl_audit_current_stage(run_id: int) -> str | None:
+    with db() as conn:
+        row = conn.execute("SELECT current_stage FROM etl_audit_log WHERE run_id=? ORDER BY id DESC LIMIT 1", (run_id,)).fetchone()
+    return str(dict(row).get("current_stage")) if row and dict(row).get("current_stage") else None
+
+
+def _duration_seconds(start_time: str | None, end_time: str) -> float | None:
+    if not start_time:
+        return None
+    try:
+        return round((datetime.fromisoformat(end_time) - datetime.fromisoformat(start_time)).total_seconds(), 3)
+    except ValueError:
+        return None
+
+
+def _source_path(source_key: str, config: dict[str, Any], rows: list[dict[str, Any]] | None = None) -> str:
+    if rows:
+        files = sorted({str(row.get("_source_file")) for row in rows if row.get("_source_file")})
+        if files:
+            return ",".join(files)
+    if source_key == "sftp_source":
+        return _format_path_pattern(str(config.get("remote_path") or config.get("path_pattern") or ""))
+    if source_key == "csv_file":
+        return str(config.get("path") or "")
+    if source_key == "postgres_source":
+        if config.get("query"):
+            return "query"
+        return ".".join(str(part) for part in (config.get("schema", "public"), config.get("table", "")) if part)
+    return source_key
+
+
+def _target_path(destination_key: str, config: dict[str, Any]) -> str:
+    if destination_key == "sftp_destination":
+        try:
+            return _sftp_write_path(config)
+        except ValueError:
+            return str(config.get("remote_path") or config.get("output_path_pattern") or "")
+    if destination_key in {"csv_output", "jsonl_file"}:
+        return str(config.get("path") or "")
+    if destination_key == "postgres_destination":
+        return ".".join(str(part) for part in (config.get("schema", "public"), config.get("table", "")) if part)
+    return destination_key
 
 
 def _log(run_id: int, level: str, message: str) -> None:

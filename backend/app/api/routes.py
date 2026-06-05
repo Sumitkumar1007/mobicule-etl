@@ -8,6 +8,7 @@ from app.models.schemas import (
     ConnectorTestRequest,
     ConnectorTestResponse,
     AuditLog,
+    EtlAuditLog,
     AuthResponse,
     ChangePasswordRequest,
     LoginRequest,
@@ -37,7 +38,7 @@ from app.core.security import hash_password, hash_token, verify_password
 from app.services.auth import bearer_token, current_user, login, logout, require_role
 from app.services.connectivity import test_connection
 from app.services.metadata import source_columns, source_options
-from app.services.runner import enqueue_run, extract, prepare_runtime_transforms, preview
+from app.services.runner import enqueue_run, extract, mark_run_stopped_audit, prepare_runtime_transforms, preview
 from app.services.transforms import preview_transforms, validate_transforms
 
 router = APIRouter()
@@ -492,7 +493,8 @@ def start_run(pipeline_id: int, request: Request) -> Run:
         exists = conn.execute("SELECT 1 FROM pipelines WHERE id=?", (pipeline_id,)).fetchone()
     if exists is None:
         raise HTTPException(status_code=404, detail="Pipeline not found")
-    run_id = enqueue_run(pipeline_id)
+    user = current_user(request)
+    run_id = enqueue_run(pipeline_id, job_type="manual", triggered_by=user.email)
     _audit(request, "run", "pipeline", pipeline_id, {"run_id": run_id})
     return get_run(run_id)
 
@@ -509,6 +511,8 @@ def stop_run(run_id: int, request: Request) -> Run:
             """,
             (run_id,),
         )
+    user = current_user(request)
+    mark_run_stopped_audit(run_id, user.email)
     _audit(request, "stop", "run", run_id, {})
     return get_run(run_id)
 
@@ -640,6 +644,14 @@ def audit_logs(request: Request) -> list[AuditLog]:
     with db() as conn:
         rows = conn.execute("SELECT * FROM audit_logs ORDER BY id DESC LIMIT 200").fetchall()
     return [_audit_log_from_row(row) for row in rows]
+
+
+@router.get("/etl-audit-logs", response_model=list[EtlAuditLog])
+def etl_audit_logs(request: Request) -> list[EtlAuditLog]:
+    require_role(request, {"admin", "support"})
+    with db() as conn:
+        rows = conn.execute("SELECT * FROM etl_audit_log ORDER BY id DESC LIMIT 200").fetchall()
+    return [EtlAuditLog(**dict(row)) for row in rows]
 
 
 @router.post("/preview")

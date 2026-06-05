@@ -337,6 +337,8 @@ class TransformationExecutor:
                 value = item.get("value", "")
             if not name:
                 continue
+            if name in result.columns and not params.get("override_existing", False):
+                continue
             if value_type == "null":
                 result[name] = None
             elif value_type == "custom":

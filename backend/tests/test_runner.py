@@ -128,3 +128,41 @@ def test_rejected_output_path_adds_datetime_before_extension(monkeypatch):
     monkeypatch.setattr(runner, "datetime", FixedDateTime)
 
     assert runner._rejected_output_path("/out/final.csv") == "/out/final_rejected_20260525063005.csv"
+
+
+
+def test_sftp_read_paths_formats_current_date_pattern(monkeypatch):
+    from datetime import UTC, datetime
+
+    from app.services import runner
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 6, 5, 7, 8, 9, tzinfo=UTC)
+
+    class Client:
+        def listdir(self, directory):
+            assert directory == "/in"
+            return ["loan_20260605.csv", "loan_20260604.csv"]
+
+    monkeypatch.setattr(runner, "datetime", FixedDateTime)
+
+    assert runner._sftp_read_paths(Client(), {"path_pattern": "/in/loan_{YYYY}{MM}{DD}.csv"}) == ["/in/loan_20260605.csv"]
+
+
+def test_rejected_write_path_uses_configured_error_pattern(monkeypatch):
+    from datetime import UTC, datetime
+
+    from app.services import runner
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 6, 5, 7, 8, 9, tzinfo=UTC)
+
+    monkeypatch.setattr(runner, "datetime", FixedDateTime)
+
+    path = runner._rejected_write_path({"rejected_path_pattern": "/err/rejected_{YYYY}{MM}{DD}_{timestamp}.jsonl"}, "/out/final.csv")
+
+    assert path == "/err/rejected_20260605_20260605070809.jsonl"

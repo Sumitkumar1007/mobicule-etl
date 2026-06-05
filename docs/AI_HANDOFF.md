@@ -13,7 +13,7 @@ MobiFlow ETL is a working MVP for UI-managed ETL:
 - In-process runner and scheduler.
 - PostgreSQL and SFTP source/destination support.
 - Auth with roles: `admin`, `support`, `viewer`.
-- Manual runs, cron-style scheduled runs, logs, audit logs.
+- Manual runs, cron-style scheduled runs, run logs, and ETL audit logs.
 
 Latest verification from this workspace:
 
@@ -95,8 +95,11 @@ Transform steps:
 - Runner falls back to stored pipeline `transforms` if no published snapshot is found.
 - `cast` rejects invalid numeric/date/boolean values and preserves rejected rows with `_rejected_*` columns.
 - Rejected rows are written for SFTP destinations and local CSV/JSONL legacy destinations.
-- SFTP source can read one `remote_path` or match `path_pattern`.
+- `blank_columns` only creates missing columns by default; it does not overwrite existing values such as `PARTY_MOBILE_NUMBER` unless `override_existing=true`.
+- SFTP source can read one `remote_path` or match `path_pattern`; both support date tokens like `{YYYY}{MM}{DD}`.
 - SFTP destination can write `remote_path` or formatted `output_path_pattern`.
+- Rejected/error files can use `rejected_path` or `rejected_path_pattern`.
+- `etl_audit_log` tracks pipeline run lifecycle; `audit_logs` remains app/user-management audit.
 - PostgreSQL source with no raw query builds `SELECT * FROM "schema"."table" LIMIT 1000`.
 - PostgreSQL destination supports append, upsert, and truncate-insert.
 

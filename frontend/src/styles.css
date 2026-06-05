@@ -1003,6 +1003,15 @@ textarea {
   font-size: 13px;
 }
 
+.patternPreview {
+  display: block;
+  margin-top: 6px;
+  color: #2f6b3c;
+  font-size: 12px;
+  font-weight: 800;
+  word-break: break-all;
+}
+
 .executionSummary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

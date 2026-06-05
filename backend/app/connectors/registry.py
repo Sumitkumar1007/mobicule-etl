@@ -24,6 +24,9 @@ SFTP_FIELDS = {
     "remote_path": {"type": "string"},
     "path_pattern": {"type": "string"},
     "output_path_pattern": {"type": "string"},
+    "rejected_path": {"type": "string"},
+    "rejected_path_pattern": {"type": "string"},
+    "xlsx_data_sheet": {"type": "string"},
     "format": {"type": "string", "enum": ["csv", "xlsx"], "default": "csv"},
 }
 

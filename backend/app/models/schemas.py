@@ -235,3 +235,27 @@ class AuditLog(BaseModel):
     entity_id: str | None = None
     details: dict[str, Any] = Field(default_factory=dict)
     created_at: str
+
+
+class EtlAuditLog(BaseModel):
+    id: int
+    run_id: int | None = None
+    pipeline_name: str | None = None
+    job_type: str | None = None
+    start_time: str | None = None
+    end_time: str | None = None
+    duration_seconds: float | None = None
+    status: str
+    current_stage: str | None = None
+    failed_stage: str | None = None
+    source_path: str | None = None
+    target_path: str | None = None
+    total_count: int = 0
+    success_count: int = 0
+    failed_count: int = 0
+    rejected_count: int = 0
+    error_message: str | None = None
+    error_file_path: str | None = None
+    triggered_by: str | None = None
+    created_date: str
+    last_modified_date: str

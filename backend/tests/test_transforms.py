@@ -163,6 +163,22 @@ def test_validate_step_rejects_bad_rows_and_continues_pipeline():
     assert "due_date" in result.rejected_rows[0]["_rejected_column"]
 
 
+def test_blank_columns_does_not_overwrite_existing_values():
+    result = apply_transforms(
+        [{"PARTY_MOBILE_NUMBER": "9876543210"}],
+        [
+            {
+                "id": "blank",
+                "step_type": "blank_columns",
+                "step_name": "Add Blank Columns",
+                "parameters": {"columns": "PARTY_MOBILE_NUMBER,PARTY_EMAIL"},
+            }
+        ],
+    )
+
+    assert result == [{"PARTY_MOBILE_NUMBER": "9876543210", "PARTY_EMAIL": ""}]
+
+
 def test_validate_step_supports_exact_length():
     from app.services.transforms import preview_transforms
 

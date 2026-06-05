@@ -192,7 +192,8 @@ Tables created by `init_db()`:
 - `runs`: run status, row counts, errors.
 - `run_logs`: human-readable run logs.
 - `transformation_run_logs`: step-level transform logs.
-- `audit_logs`: admin/support mutation trail for production review.
+- `audit_logs`: admin/support mutation trail for application/user-management review.
+- `etl_audit_log`: ETL pipeline run audit trail with stages, counts, paths, rejected/error file path, timing, and trigger identity.
 
 Schema is currently created with `CREATE TABLE IF NOT EXISTS` and small `ALTER TABLE` statements. No formal migration tool yet.
 
@@ -230,12 +231,15 @@ PostgreSQL destination supports:
 SFTP source supports:
 
 - single `remote_path`
-- wildcard `path_pattern`
+- wildcard/date `path_pattern`
+- date tokens `{YYYY}`, `{YY}`, `{MM}`, `{DD}`, `{hh}`, `{mm}`, `{ss}`, `{timestamp}`
 - CSV and XLSX
 
 SFTP destination supports:
 
 - `remote_path`
+- date-based `output_path_pattern`
+- rejected/error output with `rejected_path` or `rejected_path_pattern`
 - CSV and XLSX
 
 ## 10. ETL Run Lifecycle
@@ -281,6 +285,42 @@ Stop behavior:
 - `/api/runs/{run_id}/stop` marks queued/running runs failed.
 - Runner checks DB status between major phases.
 - If stopped, runner exits without overwriting final failed status.
+
+## SFTP Pattern Resolution
+
+Location: `backend/app/services/runner.py`
+
+`_format_path_pattern()` resolves these UTC tokens at run time:
+
+```text
+{YYYY} {YY} {MM} {DD} {hh} {mm} {ss} {timestamp}
+```
+
+Examples:
+
+```text
+/in/input_{YYYY}{MM}{DD}.csv
+/out/output_{YYYY}-{MM}-{DD}.xlsx
+/err/rejected_{YYYY}{MM}{DD}_{timestamp}.csv
+```
+
+Resolution happens when the scheduled/manual run executes, not when the pipeline is saved. The frontend shows the same resolved preview beside pattern inputs.
+
+## ETL Audit Log
+
+Table: `etl_audit_log`
+
+Columns:
+
+```text
+id, run_id, pipeline_name, job_type, start_time, end_time,
+duration_seconds, status, current_stage, failed_stage,
+source_path, target_path, total_count, success_count,
+failed_count, rejected_count, error_message, error_file_path,
+triggered_by, created_date, last_modified_date
+```
+
+Runner writes one row per run. Stages are updated through extract, transform, reject, load, completed, failed, or stopped. Manual trigger uses the current user email. Scheduler trigger uses `scheduler`.
 
 ## 11. Extract Logic
 

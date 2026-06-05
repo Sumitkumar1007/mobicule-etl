@@ -22,6 +22,8 @@ MobiFlow ETL is a UI-driven ETL control plane. Users create datasources, destina
 - Manual pipeline runs.
 - Cron-style scheduled runs, including `*/2 * * * *`.
 - Runs & Logs screen with step-wise execution messages.
+- ETL Audit screen backed by `etl_audit_log` for pipeline run lifecycle and counts.
+- SFTP date filename patterns for scheduled input/output/error files.
 - Access Control screen for user/role records.
 
 ## Project Structure
@@ -177,6 +179,49 @@ Use these filenames:
 Recommended capture size: `1440 x 1000`.
 
 The SOP links these files automatically.
+
+## SFTP Date Filename Patterns
+
+SFTP source and destination configs support runtime date tokens. The UI shows a live `Resolved today` preview under each pattern field.
+
+Supported tokens:
+
+```text
+{YYYY} {YY} {MM} {DD} {hh} {mm} {ss} {timestamp}
+```
+
+Examples on `2026-06-05` UTC:
+
+```text
+/in/customers_{YYYY}{MM}{DD}.csv
+-> /in/customers_20260605.csv
+
+/out/result_{YYYY}-{MM}-{DD}.xlsx
+-> /out/result_2026-06-05.xlsx
+
+/err/rejected_{YYYY}{MM}{DD}_{timestamp}.csv
+-> /err/rejected_20260605_20260605070809.csv
+```
+
+Source config fields:
+
+- `remote_path`: exact file path, date tokens allowed.
+- `path_pattern`: date/wildcard path, for example `/in/*_{YYYY}{MM}{DD}.csv`.
+
+Destination config fields:
+
+- `remote_path`: exact output path, date tokens allowed.
+- `output_path_pattern`: date-based output path.
+- `rejected_path`: exact rejected/error file path.
+- `rejected_path_pattern`: date-based rejected/error file path.
+
+## ETL Audit
+
+Pipeline runs write lifecycle records to `etl_audit_log`, separate from app-management `audit_logs`.
+
+Tracked columns include run id, pipeline name, job type, start/end time, duration, status, current/failed stage, source/target paths, total/success/failed/rejected counts, error message, error file path, and trigger user.
+
+Manual runs set `job_type=manual` and `triggered_by=<user email>`. Scheduled runs set `job_type=scheduled` and `triggered_by=scheduler`.
 
 ## Common Commands
 

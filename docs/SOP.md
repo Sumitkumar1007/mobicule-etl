@@ -145,6 +145,7 @@ SFTP source fields:
 - Username
 - Password or private key
 - Remote path
+- Date file pattern
 - Format: CSV or XLSX
 
 Validation tips:
@@ -152,6 +153,8 @@ Validation tips:
 - Host must not contain extra characters.
 - PostgreSQL table must exist.
 - SFTP remote path must point to a readable file.
+- Use Date file pattern for scheduled daily files, for example `/in/customers_{YYYY}{MM}{DD}.csv`.
+- The UI shows `Resolved today` below the pattern.
 - For CSV files, first row must contain headers.
 
 ## 7. Configure Destination
@@ -168,6 +171,8 @@ Steps:
 Important SFTP note:
 
 - Destination remote path must be a full file path, not only a directory.
+- Use Output date pattern for dated outputs, for example `/out/result_{YYYY}{MM}{DD}.csv`.
+- Use Rejected/error path or Rejected/error pattern to control where bad-record files are written.
 - Correct example:
 
 ```text
@@ -179,6 +184,35 @@ Important SFTP note:
 ```text
 /home/sumit/sftp-test
 ```
+
+## SFTP Date Pattern Examples
+
+Supported tokens:
+
+```text
+{YYYY} {YY} {MM} {DD} {hh} {mm} {ss} {timestamp}
+```
+
+If current UTC date is `2026-06-05`:
+
+```text
+/in/paytm/input_{YYYY}{MM}{DD}.csv
+-> /in/paytm/input_20260605.csv
+
+/out/paytm/output_{DD}{MM}{YYYY}.xlsx
+-> /out/paytm/output_05062026.xlsx
+
+/err/paytm/rejected_{YYYY}{MM}{DD}_{timestamp}.csv
+-> /err/paytm/rejected_20260605_20260605070809.csv
+```
+
+The pattern is resolved when the pipeline run starts. Scheduled runs therefore pick files based on the run date.
+
+## ETL Audit Log
+
+Open `ETL Audit` to see pipeline-run audit rows from `etl_audit_log`.
+
+This is separate from user/application management audit logs. It tracks run id, pipeline name, manual/scheduled job type, trigger user, stage, source path, target path, counts, rejected count, error message, and error file path.
 
 ## 8. Build Transformation
 
@@ -634,6 +668,7 @@ Before production:
 - Store secrets in vault.
 - Move scheduler/runner to durable worker service.
 - Add retries and dead-letter handling.
-- Add audit logs for create/update/delete/publish.
+- Keep app-management audit logs for create/update/delete/publish.
+- Keep ETL run auditing in `etl_audit_log` for pipeline execution stages, counts, paths, errors, and rejected-file location.
 - Add backup and retention policy for metadata DB.
 - Add deployment automation and health monitoring.

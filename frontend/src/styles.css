@@ -163,6 +163,7 @@ nav button.active {
 
 .workspace {
   padding: 28px;
+
 }
 
 .topbar {
@@ -1280,8 +1281,8 @@ nav button.active {
 }
 
 .workspace {
-  padding: 32px;
-  min-width: 0;
+  /* padding: 32px */
+
 }
 
 .topbar {
@@ -1893,4 +1894,7 @@ h2 {
   .formulaGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+section.workspace {
+  padding: 0 10px 5px;
 }

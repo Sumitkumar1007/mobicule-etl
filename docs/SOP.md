@@ -171,7 +171,8 @@ Steps:
 Important SFTP note:
 
 - Destination remote path must be a full file path, not only a directory.
-- Use Output date pattern for dated outputs, for example `/out/result_{YYYY}{MM}{DD}.csv`.
+- Use Output date pattern for dated outputs, for example `/out/{YYYY}/{MM}/{DD}/result.csv`.
+- Missing SFTP output folders are created automatically by default.
 - Use Rejected/error path or Rejected/error pattern to control where bad-record files are written.
 - Correct example:
 
@@ -206,7 +207,21 @@ If current UTC date is `2026-06-05`:
 -> /err/paytm/rejected_20260605_20260605070809.csv
 ```
 
-The pattern is resolved when the pipeline run starts. Scheduled runs therefore pick files based on the run date.
+The pattern is resolved when the pipeline run starts. Scheduled runs therefore pick files based on the run date. For SFTP destinations, missing folders in the resolved output path are created automatically.
+
+## PII Column Configuration
+
+For destination config, enter PII columns as a comma-separated list:
+
+```text
+PARTY_MOBILE_NUMBER, PARTY_EMAIL
+```
+
+Behavior:
+
+- PostgreSQL destination stores encrypted values with `enc:v1:` prefix.
+- File destinations and rejected/error files write masked values.
+- Keep `MOBIFLOW_PII_ENCRYPTION_KEY` stable across deployments.
 
 ## ETL Audit Log
 

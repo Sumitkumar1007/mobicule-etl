@@ -99,7 +99,9 @@ Transform steps:
 - SFTP source can read one `remote_path` or match `path_pattern`; both support date tokens like `{YYYY}{MM}{DD}`.
 - SFTP destination can write `remote_path` or formatted `output_path_pattern`.
 - Rejected/error files can use `rejected_path` or `rejected_path_pattern`.
+- SFTP destination auto-creates missing output/rejected folders by default; `auto_create_folders=false` disables it.
 - `etl_audit_log` tracks pipeline run lifecycle; `audit_logs` remains app/user-management audit.
+- Destination `pii_columns` encrypts configured columns for PostgreSQL writes and masks those columns for file/rejected outputs. Encryption key comes from `MOBIFLOW_PII_ENCRYPTION_KEY`.
 - PostgreSQL source with no raw query builds `SELECT * FROM "schema"."table" LIMIT 1000`.
 - PostgreSQL destination supports append, upsert, and truncate-insert.
 

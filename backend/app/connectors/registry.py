@@ -4,6 +4,10 @@ from app.core.config import get_settings
 from app.models.schemas import ConnectorDefinition
 
 
+PII_FIELDS = {
+    "pii_columns": {"type": "string"},
+}
+
 POSTGRES_FIELDS = {
     "host": {"type": "string"},
     "port": {"type": "number", "default": 5432},
@@ -27,6 +31,7 @@ SFTP_FIELDS = {
     "rejected_path": {"type": "string"},
     "rejected_path_pattern": {"type": "string"},
     "xlsx_data_sheet": {"type": "string"},
+    "auto_create_folders": {"type": "boolean", "default": True},
     "format": {"type": "string", "enum": ["csv", "xlsx"], "default": "csv"},
 }
 
@@ -65,6 +70,7 @@ CONNECTORS: dict[str, ConnectorDefinition] = {
                 **POSTGRES_FIELDS,
                 "mode": {"type": "string", "enum": ["append", "upsert", "truncate_insert"], "default": "append"},
                 "primary_key": {"type": "string"},
+                **PII_FIELDS,
             },
         },
     ),
@@ -76,7 +82,7 @@ CONNECTORS: dict[str, ConnectorDefinition] = {
         config_schema={
             "type": "object",
             "required": ["host", "username"],
-            "properties": SFTP_FIELDS,
+            "properties": {**SFTP_FIELDS, **PII_FIELDS},
         },
     ),
 }

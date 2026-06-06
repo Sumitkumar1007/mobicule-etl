@@ -240,6 +240,7 @@ SFTP destination supports:
 - `remote_path`
 - date-based `output_path_pattern`
 - rejected/error output with `rejected_path` or `rejected_path_pattern`
+- automatic recursive directory creation before SFTP writes, controlled by `auto_create_folders` and enabled by default
 - CSV and XLSX
 
 ## 10. ETL Run Lifecycle
@@ -304,7 +305,19 @@ Examples:
 /err/rejected_{YYYY}{MM}{DD}_{timestamp}.csv
 ```
 
-Resolution happens when the scheduled/manual run executes, not when the pipeline is saved. The frontend shows the same resolved preview beside pattern inputs.
+Resolution happens when the scheduled/manual run executes, not when the pipeline is saved. The frontend shows the same resolved preview beside pattern inputs. `_ensure_sftp_directory()` recursively creates missing destination directories before file write.
+
+## PII Protection
+
+Location: `backend/app/services/pii.py`
+
+Destination configs can include `pii_columns` as a comma-separated string or list. Runner behavior:
+
+- PostgreSQL destination calls `encrypt_pii_rows()` before SQL insert/upsert.
+- CSV/JSONL/SFTP destinations call `mask_pii_rows()` before file writes.
+- Rejected/error record files are masked through `save_rejected_records()`.
+
+Encrypted values are stored with `enc:v1:` prefix. The key is derived from `MOBIFLOW_PII_ENCRYPTION_KEY`; if unset, the app falls back to local secrets, which is not recommended for production.
 
 ## ETL Audit Log
 

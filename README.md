@@ -24,6 +24,8 @@ MobiFlow ETL is a UI-driven ETL control plane. Users create datasources, destina
 - Runs & Logs screen with step-wise execution messages.
 - ETL Audit screen backed by `etl_audit_log` for pipeline run lifecycle and counts.
 - SFTP date filename patterns for scheduled input/output/error files.
+- Configurable PII columns with encryption for PostgreSQL destination writes and masking for file outputs.
+- SFTP destination auto-creates output/rejected subfolders for dated folder patterns.
 - Access Control screen for user/role records.
 
 ## Project Structure
@@ -60,6 +62,7 @@ Then edit the database URL:
 MOBIFLOW_METADATA_DATABASE_URL=postgresql://postgres:password@host:5432/mobiflow
 MOBIFLOW_BOOTSTRAP_ADMIN_EMAIL=admin@mobiflow.local
 MOBIFLOW_BOOTSTRAP_ADMIN_PASSWORD=change-me-with-strong-password
+MOBIFLOW_PII_ENCRYPTION_KEY=change-me-to-a-long-random-secret
 ```
 
 The current local app reads these values from `.env`. On first backend start, the bootstrap admin user is created. If the admin already exists and has no password hash, the backend sets this password during startup.
@@ -196,8 +199,8 @@ Examples on `2026-06-05` UTC:
 /in/customers_{YYYY}{MM}{DD}.csv
 -> /in/customers_20260605.csv
 
-/out/result_{YYYY}-{MM}-{DD}.xlsx
--> /out/result_2026-06-05.xlsx
+/out/{YYYY}/{MM}/{DD}/result.xlsx
+-> /out/2026/06/05/result.xlsx
 
 /err/rejected_{YYYY}{MM}{DD}_{timestamp}.csv
 -> /err/rejected_20260605_20260605070809.csv
@@ -214,6 +217,41 @@ Destination config fields:
 - `output_path_pattern`: date-based output path.
 - `rejected_path`: exact rejected/error file path.
 - `rejected_path_pattern`: date-based rejected/error file path.
+- `auto_create_folders`: creates missing SFTP directories before writing; enabled by default.
+
+## SFTP Auto-Created Output Folders
+
+SFTP destination creates missing folders automatically before writing output or rejected/error files.
+
+Example:
+
+```text
+output_path_pattern=/out/{YYYY}/{MM}/{DD}/result.csv
+rejected_path_pattern=/out/{YYYY}/{MM}/{DD}/errors/rejected_{timestamp}.csv
+```
+
+On `2026-06-06`, the runner creates:
+
+```text
+/out/2026/06/06/
+/out/2026/06/06/errors/
+```
+
+Then it writes the files. This removes the need to manually create output folders on SFTP.
+
+## PII Protection
+
+Destination config supports `pii_columns` as a comma-separated list:
+
+```text
+PARTY_MOBILE_NUMBER, PARTY_EMAIL
+```
+
+Behavior:
+
+- PostgreSQL destination encrypts configured PII column values before insert/upsert. Stored values use the `enc:v1:` prefix.
+- CSV, JSONL, SFTP CSV, SFTP XLSX, and rejected/error files mask configured PII columns before writing.
+- Configure `MOBIFLOW_PII_ENCRYPTION_KEY` with a stable secret. Changing this key makes older encrypted values undecryptable by the app.
 
 ## ETL Audit
 

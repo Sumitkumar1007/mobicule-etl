@@ -166,3 +166,78 @@ def test_rejected_write_path_uses_configured_error_pattern(monkeypatch):
     path = runner._rejected_write_path({"rejected_path_pattern": "/err/rejected_{YYYY}{MM}{DD}_{timestamp}.jsonl"}, "/out/final.csv")
 
     assert path == "/err/rejected_20260605_20260605070809.jsonl"
+
+
+
+def test_pii_encrypt_rows_round_trip():
+    from app.services.pii import decrypt_value, encrypt_pii_rows
+
+    rows = encrypt_pii_rows([{"name": "Ada", "mobile": "9876543210"}], {"pii_columns": "mobile"})
+
+    assert rows[0]["name"] == "Ada"
+    assert rows[0]["mobile"].startswith("enc:v1:")
+    assert rows[0]["mobile"] != "9876543210"
+    assert decrypt_value(rows[0]["mobile"]) == "9876543210"
+
+
+def test_pii_mask_rows_for_file_outputs():
+    from app.services.pii import mask_pii_rows
+
+    rows = mask_pii_rows([{"mobile": "9876543210", "email": "customer@example.com"}], {"pii_columns": ["mobile", "email"]})
+
+    assert rows == [{"mobile": "*******210", "email": "****************.com"}]
+
+
+def test_csv_payload_masks_configured_pii_columns():
+    from app.services.pii import mask_pii_rows
+    from app.services.runner import _rows_payload
+
+    rows = mask_pii_rows([{"id": "1", "mobile": "9876543210"}], {"pii_columns": "mobile"})
+    payload = _rows_payload("/out/result.csv", rows)
+
+    assert payload.decode("utf-8").splitlines() == ["id,mobile", "1,*******210"]
+
+
+
+def test_ensure_sftp_directory_creates_nested_folders():
+    from app.services.runner import _ensure_sftp_directory
+
+    class Client:
+        def __init__(self):
+            self.dirs = {"/"}
+            self.created = []
+
+        def stat(self, path):
+            if path not in self.dirs:
+                raise OSError(path)
+
+        def mkdir(self, path):
+            self.created.append(path)
+            self.dirs.add(path)
+
+    client = Client()
+    _ensure_sftp_directory(client, "/out/2026/06/06/result.csv")
+
+    assert client.created == ["/out", "/out/2026", "/out/2026/06", "/out/2026/06/06"]
+
+
+def test_ensure_sftp_directory_skips_existing_folders():
+    from app.services.runner import _ensure_sftp_directory
+
+    class Client:
+        def __init__(self):
+            self.dirs = {"/", "/out", "/out/2026"}
+            self.created = []
+
+        def stat(self, path):
+            if path not in self.dirs:
+                raise OSError(path)
+
+        def mkdir(self, path):
+            self.created.append(path)
+            self.dirs.add(path)
+
+    client = Client()
+    _ensure_sftp_directory(client, "/out/2026/06/result.csv")
+
+    assert client.created == ["/out/2026/06"]

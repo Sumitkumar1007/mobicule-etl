@@ -1290,6 +1290,7 @@ function DatasetTargetEditor({ title, resource, value, options, onChange }: { ti
       <label>{title} table<SelectOrInput value={String(value.table ?? "")} options={options.tables} placeholder="customer_summary" onChange={(next) => onChange({ ...value, table: next })} /></label>
       <label>Mode<select value={String(value.mode ?? "append")} onChange={(event) => onChange({ ...value, mode: event.target.value })}><option value="append">append</option><option value="upsert">upsert</option><option value="truncate_insert">truncate + insert</option></select></label>
       <label>Primary key<input value={String(value.primary_key ?? "")} onChange={(event) => onChange({ ...value, primary_key: event.target.value })} placeholder="customer_id" /></label>
+      <label>PII columns<input value={String(value.pii_columns ?? "")} onChange={(event) => onChange({ ...value, pii_columns: event.target.value })} placeholder="PARTY_MOBILE_NUMBER, PARTY_EMAIL" /></label>
     </div>;
   }
   if (resource.connector_key === "sftp_destination") {
@@ -1300,6 +1301,8 @@ function DatasetTargetEditor({ title, resource, value, options, onChange }: { ti
       <label>Output date pattern<input value={String(value.output_path_pattern ?? "")} onChange={(event) => onChange({ ...value, output_path_pattern: event.target.value, remote_path: "" })} placeholder="/out/result_{YYYY}{MM}{DD}.xlsx" />{Boolean(value.output_path_pattern) && <PatternPreview pattern={String(value.output_path_pattern)} />}</label>
       <label>Rejected/error path<input value={String(value.rejected_path ?? "")} onChange={(event) => onChange({ ...value, rejected_path: event.target.value, rejected_path_pattern: "" })} placeholder="/err/rejected.csv" /></label>
       <label>Rejected/error pattern<input value={String(value.rejected_path_pattern ?? "")} onChange={(event) => onChange({ ...value, rejected_path_pattern: event.target.value, rejected_path: "" })} placeholder="/err/rejected_{YYYY}{MM}{DD}_{timestamp}.csv" />{Boolean(value.rejected_path_pattern) && <PatternPreview pattern={String(value.rejected_path_pattern)} />}</label>
+      <label>PII columns<input value={String(value.pii_columns ?? "")} onChange={(event) => onChange({ ...value, pii_columns: event.target.value })} placeholder="PARTY_MOBILE_NUMBER, PARTY_EMAIL" /></label>
+      <label className="toggle inlineToggle"><input type="checkbox" checked={value.auto_create_folders !== false} onChange={(event) => onChange({ ...value, auto_create_folders: event.target.checked })} /> Auto-create output folders</label>
       <label>{title} format<select value={String(value.format ?? "csv")} onChange={(event) => onChange({ ...value, format: event.target.value })}><option value="csv">csv</option><option value="xlsx">xlsx</option></select></label>
       {isXlsx && <label>Data sheet<input value={String(value.xlsx_data_sheet ?? "Data")} onChange={(event) => onChange({ ...value, xlsx_data_sheet: event.target.value })} placeholder="Data" /></label>}
     </div>;
@@ -2016,7 +2019,7 @@ const DATE_FORMAT_OPTIONS = [
   { value: "yy/mm/dd", label: "yy/mm/dd" },
 ];
 const AGG_FUNCS = ["sum", "mean", "min", "max", "count", "count_distinct", "first", "last"];
-const CONNECTION_TARGET_FIELDS = new Set(["schema", "table", "query", "path_pattern", "output_path_pattern", "rejected_path", "rejected_path_pattern", "operation", "format", "mode", "primary_key", "xlsx_data_sheet"]);
+const CONNECTION_TARGET_FIELDS = new Set(["schema", "table", "query", "path_pattern", "output_path_pattern", "rejected_path", "rejected_path_pattern", "operation", "format", "mode", "primary_key", "xlsx_data_sheet", "pii_columns", "auto_create_folders"]);
 
 function defaultSteps(): TransformationStep[] {
   return [
@@ -2340,6 +2343,7 @@ function placeholderFor(key: string, schema: SchemaProperty) {
   if (key === "host") return "10.10.0.20";
   if (key === "database") return "analytics";
   if (key === "query") return "select * from table";
+  if (key === "pii_columns") return "PARTY_MOBILE_NUMBER, PARTY_EMAIL";
   if (key === "remote_path") return "/home/sftp/base-folder";
   if (key.includes("path")) return "/path/to/file.csv";
   return humanize(key);

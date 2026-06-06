@@ -14,6 +14,7 @@ import httpx
 from app.connectors.registry import get_connector
 from app.db.database import db, decode, encode
 from app.services.sql_safety import validate_source_query
+from app.services.pii import encrypt_pii_rows, mask_pii_rows
 from app.services.transforms import preview_transforms
 
 logger = logging.getLogger(__name__)
@@ -179,6 +180,7 @@ def _extract_sftp(config: dict[str, Any]) -> list[dict[str, Any]]:
 def save_rejected_records(destination_key: str, config: dict[str, Any], rows: list[dict[str, Any]]) -> str | None:
     if not rows:
         return None
+    rows = mask_pii_rows(rows, config)
     if destination_key == "sftp_destination":
         remote_path = _rejected_write_path(config, _sftp_write_path(config))
         _write_sftp_rows(config, remote_path, rows)
@@ -197,6 +199,7 @@ def load(destination_key: str, config: dict[str, Any], rows: list[dict[str, Any]
     if connector.type != "destination":
         raise ValueError(f"{destination_key} is not a destination")
     if destination_key == "jsonl_file":
+        rows = mask_pii_rows(rows, config)
         path = Path(config.get("path", "data/output.jsonl"))
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
@@ -204,6 +207,7 @@ def load(destination_key: str, config: dict[str, Any], rows: list[dict[str, Any]
                 handle.write(json.dumps(row) + "\n")
         return len(rows)
     if destination_key == "csv_output":
+        rows = mask_pii_rows(rows, config)
         path = Path(config.get("path", "data/output.csv"))
         path.parent.mkdir(parents=True, exist_ok=True)
         if not rows:
@@ -228,6 +232,7 @@ def _load_postgres(config: dict[str, Any], rows: list[dict[str, Any]]) -> int:
     except ImportError as exc:
         raise RuntimeError("psycopg is required for PostgreSQL destination. Install backend requirements.") from exc
 
+    rows = encrypt_pii_rows(rows, config)
     schema = "".join(ch for ch in config.get("schema", "public") if ch.isalnum() or ch == "_")
     table = "".join(ch for ch in config["table"] if ch.isalnum() or ch == "_")
     columns = [str(key) for key in rows[0].keys()] if rows else []
@@ -281,6 +286,7 @@ def _load_sftp(config: dict[str, Any], rows: list[dict[str, Any]]) -> int:
         import paramiko
     except ImportError as exc:
         raise RuntimeError("paramiko is required for SFTP destination. Install backend requirements.") from exc
+    rows = mask_pii_rows(rows, config)
     remote_path = _sftp_write_path(config)
     if config.get("format") == "xlsx" or remote_path.endswith(".xlsx"):
         payload: str | bytes = _xlsx_from_rows(rows, config)
@@ -313,10 +319,33 @@ def _write_sftp_payload(config: dict[str, Any], remote_path: str, payload: str |
     try:
         transport.connect(username=config["username"], password=password, pkey=pkey)
         client = paramiko.SFTPClient.from_transport(transport)
+        if _truthy(config.get("auto_create_folders"), default=True):
+            _ensure_sftp_directory(client, remote_path)
         with client.open(remote_path, "w") as handle:
             handle.write(payload)
     finally:
         transport.close()
+
+
+def _ensure_sftp_directory(client: Any, remote_path: str) -> None:
+    directory = posixpath.dirname(remote_path)
+    if not directory or directory in {".", "/"}:
+        return
+    current = "/" if directory.startswith("/") else ""
+    for part in [item for item in directory.split("/") if item]:
+        current = posixpath.join(current, part) if current else part
+        try:
+            client.stat(current)
+        except OSError:
+            client.mkdir(current)
+
+
+def _truthy(value: Any, default: bool = False) -> bool:
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def _row_columns(rows: list[dict[str, Any]]) -> list[str]:

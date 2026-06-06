@@ -169,36 +169,6 @@ def test_rejected_write_path_uses_configured_error_pattern(monkeypatch):
 
 
 
-def test_pii_encrypt_rows_round_trip():
-    from app.services.pii import decrypt_value, encrypt_pii_rows
-
-    rows = encrypt_pii_rows([{"name": "Ada", "mobile": "9876543210"}], {"pii_columns": "mobile"})
-
-    assert rows[0]["name"] == "Ada"
-    assert rows[0]["mobile"].startswith("enc:v1:")
-    assert rows[0]["mobile"] != "9876543210"
-    assert decrypt_value(rows[0]["mobile"]) == "9876543210"
-
-
-def test_pii_mask_rows_for_file_outputs():
-    from app.services.pii import mask_pii_rows
-
-    rows = mask_pii_rows([{"mobile": "9876543210", "email": "customer@example.com"}], {"pii_columns": ["mobile", "email"]})
-
-    assert rows == [{"mobile": "*******210", "email": "****************.com"}]
-
-
-def test_csv_payload_masks_configured_pii_columns():
-    from app.services.pii import mask_pii_rows
-    from app.services.runner import _rows_payload
-
-    rows = mask_pii_rows([{"id": "1", "mobile": "9876543210"}], {"pii_columns": "mobile"})
-    payload = _rows_payload("/out/result.csv", rows)
-
-    assert payload.decode("utf-8").splitlines() == ["id,mobile", "1,*******210"]
-
-
-
 def test_ensure_sftp_directory_creates_nested_folders():
     from app.services.runner import _ensure_sftp_directory
 
@@ -241,3 +211,48 @@ def test_ensure_sftp_directory_skips_existing_folders():
     _ensure_sftp_directory(client, "/out/2026/06/result.csv")
 
     assert client.created == ["/out/2026/06"]
+
+
+
+def test_xlsx_input_fails_when_multiple_sheets():
+    import io
+
+    from openpyxl import Workbook
+
+    from app.services.runner import _rows_from_xlsx
+
+    workbook = Workbook()
+    workbook.active.title = "Data"
+    workbook.create_sheet("Other")
+    output = io.BytesIO()
+    workbook.save(output)
+
+    try:
+        _rows_from_xlsx(output.getvalue())
+    except ValueError as exc:
+        assert "exactly one sheet" in str(exc)
+    else:
+        raise AssertionError("multiple sheets should fail")
+
+
+def test_xlsx_input_fails_when_hidden_sheet_present():
+    import io
+
+    from openpyxl import Workbook
+
+    from app.services.runner import _rows_from_xlsx
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Data"
+    hidden = workbook.create_sheet("Hidden")
+    hidden.sheet_state = "hidden"
+    output = io.BytesIO()
+    workbook.save(output)
+
+    try:
+        _rows_from_xlsx(output.getvalue())
+    except ValueError as exc:
+        assert "hidden sheets" in str(exc)
+    else:
+        raise AssertionError("hidden sheets should fail")

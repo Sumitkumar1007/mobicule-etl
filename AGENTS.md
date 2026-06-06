@@ -13,7 +13,7 @@ Read these first:
 - `README.md`
 - `docs/AI_HANDOFF.md`
 - `docs/TEAM_TECHNICAL_OVERVIEW.md`
-- `docs/TRANSFORMATION_GUIDE.md`
+- `docs/ETL_TOOL_GUIDE.md`
 - `docs/SOP.md`
 
 ## Repo Map

@@ -24,7 +24,7 @@ MobiFlow ETL is a UI-driven ETL control plane. Users create datasources, destina
 - Runs & Logs screen with step-wise execution messages.
 - ETL Audit screen backed by `etl_audit_log` for pipeline run lifecycle and counts.
 - SFTP date filename patterns for scheduled input/output/error files.
-- Configurable PII columns with encryption for PostgreSQL destination writes and masking for file outputs.
+- Transformation step for PII encryption/masking on selected columns.
 - SFTP destination auto-creates output/rejected subfolders for dated folder patterns.
 - Access Control screen for user/role records.
 
@@ -44,7 +44,7 @@ frontend/
   src/styles.css               UI styling
 docs/
   SOP.md                       Detailed user guide
-  TRANSFORMATION_GUIDE.md      Detailed transformation builder guide
+  ETL_TOOL_GUIDE.md      Detailed ETL tool user guide
   TEAM_TECHNICAL_OVERVIEW.md   Technical overview for engineering handoff
 ```
 
@@ -219,6 +219,10 @@ Destination config fields:
 - `rejected_path_pattern`: date-based rejected/error file path.
 - `auto_create_folders`: creates missing SFTP directories before writing; enabled by default.
 
+## XLSX Input Rules
+
+Input XLSX files must contain exactly one visible sheet. If the workbook has multiple sheets, or any hidden sheet, the job fails. Password-protected XLSX input requires `file_password` in source config and `msoffcrypto-tool` installed in backend requirements.
+
 ## SFTP Auto-Created Output Folders
 
 SFTP destination creates missing folders automatically before writing output or rejected/error files.
@@ -241,7 +245,7 @@ Then it writes the files. This removes the need to manually create output folder
 
 ## PII Protection
 
-Destination config supports `pii_columns` as a comma-separated list:
+Use the `Encrypt PII` transformation step and select columns:
 
 ```text
 PARTY_MOBILE_NUMBER, PARTY_EMAIL
@@ -249,9 +253,9 @@ PARTY_MOBILE_NUMBER, PARTY_EMAIL
 
 Behavior:
 
-- PostgreSQL destination encrypts configured PII column values before insert/upsert. Stored values use the `enc:v1:` prefix.
-- CSV, JSONL, SFTP CSV, SFTP XLSX, and rejected/error files mask configured PII columns before writing.
-- Configure `MOBIFLOW_PII_ENCRYPTION_KEY` with a stable secret. Changing this key makes older encrypted values undecryptable by the app.
+- `encrypt` mode replaces selected values with encrypted `enc:v1:` values.
+- `mask` mode replaces selected values with masked text for reporting/export use cases.
+- Use `key_id` in the Encrypt PII step for client-specific keys. Configure `MOBIFLOW_PII_ENCRYPTION_KEYS` as JSON, for example `{ "client_a": "secret-a", "client_b": "secret-b" }`, or use `MOBIFLOW_PII_ENCRYPTION_KEY` as fallback. Changing this key makes older encrypted values undecryptable by the app.
 
 ## ETL Audit
 

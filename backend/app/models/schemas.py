@@ -86,7 +86,7 @@ class Pipeline(PipelineCreate):
 
 class TransformationStep(BaseModel):
     id: str
-    step_type: Literal["select", "rename", "cast", "validate", "fillna", "derive", "blank_columns", "filter", "deduplicate", "reorder", "sort", "join", "groupby", "pivot", "value_map", "custom"]
+    step_type: Literal["select", "rename", "cast", "validate", "pii_encrypt", "fillna", "derive", "blank_columns", "filter", "deduplicate", "reorder", "sort", "join", "groupby", "pivot", "value_map", "custom"]
     step_name: str
     is_enabled: bool = True
     note: str | None = None

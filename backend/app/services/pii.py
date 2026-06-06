@@ -8,29 +8,7 @@ from typing import Any
 from app.core.config import get_settings
 
 PREFIX = "enc:v1:"
-
-
-def configured_pii_columns(config: dict[str, Any]) -> list[str]:
-    raw = config.get("pii_columns") or config.get("pii_mask_columns") or []
-    if isinstance(raw, str):
-        return [item.strip() for item in raw.split(",") if item.strip()]
-    if isinstance(raw, list):
-        return [str(item).strip() for item in raw if str(item).strip()]
-    return []
-
-
-def encrypt_pii_rows(rows: list[dict[str, Any]], config: dict[str, Any]) -> list[dict[str, Any]]:
-    columns = configured_pii_columns(config)
-    if not columns:
-        return rows
-    return [_with_pii(row, columns, encrypt_value) for row in rows]
-
-
-def mask_pii_rows(rows: list[dict[str, Any]], config: dict[str, Any]) -> list[dict[str, Any]]:
-    columns = configured_pii_columns(config)
-    if not columns:
-        return rows
-    return [_with_pii(row, columns, mask_value) for row in rows]
+DEFAULT_KEY_ID = "default"
 
 
 def mask_value(value: Any) -> Any:
@@ -45,27 +23,31 @@ def mask_value(value: Any) -> Any:
     return f"{'*' * max(0, len(text) - visible)}{text[-visible:]}"
 
 
-def encrypt_value(value: Any) -> Any:
+def encrypt_value(value: Any, key_id: str | None = None) -> Any:
     if value is None or value == "":
         return value
     text = value if isinstance(value, str) else json.dumps(value, default=str, separators=(",", ":"))
     if text.startswith(PREFIX):
         return text
+    normalized_key_id = _normalize_key_id(key_id)
     nonce = secrets.token_bytes(16)
-    key = _pii_key()
+    key = _pii_key(normalized_key_id)
     plain = text.encode("utf-8")
     stream = _keystream(key, nonce, len(plain))
     cipher = bytes(byte ^ stream[index] for index, byte in enumerate(plain))
     tag = hmac.new(key, nonce + cipher, hashlib.sha256).digest()[:16]
-    return PREFIX + base64.urlsafe_b64encode(nonce + tag + cipher).decode("ascii")
+    payload = base64.urlsafe_b64encode(nonce + tag + cipher).decode("ascii")
+    return f"{PREFIX}{normalized_key_id}:{payload}"
 
 
-def decrypt_value(value: Any) -> Any:
+def decrypt_value(value: Any, key_id: str | None = None) -> Any:
     if not isinstance(value, str) or not value.startswith(PREFIX):
         return value
-    payload = base64.urlsafe_b64decode(value[len(PREFIX):].encode("ascii"))
+    key_part, payload_part = _split_ciphertext(value)
+    normalized_key_id = _normalize_key_id(key_id or key_part)
+    payload = base64.urlsafe_b64decode(payload_part.encode("ascii"))
     nonce, tag, cipher = payload[:16], payload[16:32], payload[32:]
-    key = _pii_key()
+    key = _pii_key(normalized_key_id)
     expected = hmac.new(key, nonce + cipher, hashlib.sha256).digest()[:16]
     if not hmac.compare_digest(tag, expected):
         raise ValueError("PII ciphertext failed integrity check")
@@ -74,18 +56,36 @@ def decrypt_value(value: Any) -> Any:
     return plain.decode("utf-8")
 
 
-def _with_pii(row: dict[str, Any], columns: list[str], handler) -> dict[str, Any]:
-    next_row = dict(row)
-    for column in columns:
-        if column in next_row:
-            next_row[column] = handler(next_row[column])
-    return next_row
+def _split_ciphertext(value: str) -> tuple[str, str]:
+    body = value[len(PREFIX):]
+    if ":" not in body:
+        return DEFAULT_KEY_ID, body
+    key_id, payload = body.split(":", 1)
+    return _normalize_key_id(key_id), payload
 
 
-def _pii_key() -> bytes:
+def _normalize_key_id(key_id: str | None) -> str:
+    cleaned = "".join(char for char in str(key_id or DEFAULT_KEY_ID).strip() if char.isalnum() or char in {"_", "-"})
+    return cleaned or DEFAULT_KEY_ID
+
+
+def _pii_key(key_id: str = DEFAULT_KEY_ID) -> bytes:
     settings = get_settings()
-    configured = settings.pii_encryption_key or settings.bootstrap_admin_password or settings.metadata_database_url
+    key_map = _pii_key_map(settings.pii_encryption_keys)
+    configured = key_map.get(key_id) or key_map.get(DEFAULT_KEY_ID) or settings.pii_encryption_key or settings.bootstrap_admin_password or settings.metadata_database_url
     return hashlib.sha256(str(configured).encode("utf-8")).digest()
+
+
+def _pii_key_map(raw: str | None) -> dict[str, str]:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return {_normalize_key_id(str(key)): str(value) for key, value in parsed.items() if value is not None}
 
 
 def _keystream(key: bytes, nonce: bytes, length: int) -> bytes:

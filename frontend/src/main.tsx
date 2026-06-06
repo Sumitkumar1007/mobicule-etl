@@ -109,7 +109,7 @@ type User = {
 };
 type AuthSession = { token: string; user: User };
 
-type StepType = "select" | "rename" | "cast" | "validate" | "fillna" | "derive" | "blank_columns" | "filter" | "deduplicate" | "reorder" | "sort" | "join" | "groupby" | "pivot" | "value_map" | "custom";
+type StepType = "select" | "rename" | "cast" | "validate" | "pii_encrypt" | "fillna" | "derive" | "blank_columns" | "filter" | "deduplicate" | "reorder" | "sort" | "join" | "groupby" | "pivot" | "value_map" | "custom";
 type Operand = { kind: "column" | "constant"; value: string };
 type TransformationStep = {
   id: string;
@@ -1281,7 +1281,7 @@ function DatasetTargetEditor({ title, resource, value, options, onChange }: { ti
       <label>{title} file path<SelectOrInput value={String(value.remote_path ?? "")} options={fileOptions} placeholder="/in/customers.csv" onChange={(next) => onChange({ ...value, remote_path: next, path_pattern: "", sheet_name: "" })} /></label>
       <label>Date file pattern<input value={String(value.path_pattern ?? "")} onChange={(event) => onChange({ ...value, path_pattern: event.target.value, remote_path: "", sheet_name: "" })} placeholder="/in/customers_{YYYY}{MM}{DD}.csv" />{Boolean(value.path_pattern) && <PatternPreview pattern={String(value.path_pattern)} />}</label>
       <label>{title} format<select value={String(value.format ?? "csv")} onChange={(event) => onChange({ ...value, format: event.target.value, sheet_name: "" })}><option value="csv">csv</option><option value="xlsx">xlsx</option></select></label>
-      {isXlsx && options.sheets.length > 1 && <label>Sheet<select value={String(value.sheet_name ?? "")} onChange={(event) => onChange({ ...value, sheet_name: event.target.value })}><option value="">First sheet</option>{options.sheets.map((sheet) => <option key={sheet} value={sheet}>{sheet}</option>)}</select></label>}
+      {isXlsx && <label>File password<input type="password" value={String(value.file_password ?? "")} onChange={(event) => onChange({ ...value, file_password: event.target.value })} placeholder="Only for protected XLSX" /></label>}
     </div>;
   }
   if (resource.connector_key === "postgres_destination") {
@@ -1290,7 +1290,6 @@ function DatasetTargetEditor({ title, resource, value, options, onChange }: { ti
       <label>{title} table<SelectOrInput value={String(value.table ?? "")} options={options.tables} placeholder="customer_summary" onChange={(next) => onChange({ ...value, table: next })} /></label>
       <label>Mode<select value={String(value.mode ?? "append")} onChange={(event) => onChange({ ...value, mode: event.target.value })}><option value="append">append</option><option value="upsert">upsert</option><option value="truncate_insert">truncate + insert</option></select></label>
       <label>Primary key<input value={String(value.primary_key ?? "")} onChange={(event) => onChange({ ...value, primary_key: event.target.value })} placeholder="customer_id" /></label>
-      <label>PII columns<input value={String(value.pii_columns ?? "")} onChange={(event) => onChange({ ...value, pii_columns: event.target.value })} placeholder="PARTY_MOBILE_NUMBER, PARTY_EMAIL" /></label>
     </div>;
   }
   if (resource.connector_key === "sftp_destination") {
@@ -1301,7 +1300,6 @@ function DatasetTargetEditor({ title, resource, value, options, onChange }: { ti
       <label>Output date pattern<input value={String(value.output_path_pattern ?? "")} onChange={(event) => onChange({ ...value, output_path_pattern: event.target.value, remote_path: "" })} placeholder="/out/result_{YYYY}{MM}{DD}.xlsx" />{Boolean(value.output_path_pattern) && <PatternPreview pattern={String(value.output_path_pattern)} />}</label>
       <label>Rejected/error path<input value={String(value.rejected_path ?? "")} onChange={(event) => onChange({ ...value, rejected_path: event.target.value, rejected_path_pattern: "" })} placeholder="/err/rejected.csv" /></label>
       <label>Rejected/error pattern<input value={String(value.rejected_path_pattern ?? "")} onChange={(event) => onChange({ ...value, rejected_path_pattern: event.target.value, rejected_path: "" })} placeholder="/err/rejected_{YYYY}{MM}{DD}_{timestamp}.csv" />{Boolean(value.rejected_path_pattern) && <PatternPreview pattern={String(value.rejected_path_pattern)} />}</label>
-      <label>PII columns<input value={String(value.pii_columns ?? "")} onChange={(event) => onChange({ ...value, pii_columns: event.target.value })} placeholder="PARTY_MOBILE_NUMBER, PARTY_EMAIL" /></label>
       <label className="toggle inlineToggle"><input type="checkbox" checked={value.auto_create_folders !== false} onChange={(event) => onChange({ ...value, auto_create_folders: event.target.checked })} /> Auto-create output folders</label>
       <label>{title} format<select value={String(value.format ?? "csv")} onChange={(event) => onChange({ ...value, format: event.target.value })}><option value="csv">csv</option><option value="xlsx">xlsx</option></select></label>
       {isXlsx && <label>Data sheet<input value={String(value.xlsx_data_sheet ?? "Data")} onChange={(event) => onChange({ ...value, xlsx_data_sheet: event.target.value })} placeholder="Data" /></label>}
@@ -1507,6 +1505,21 @@ function StepForm({ step, columns, sourceResources, activeSourceResource, onChan
         </div>;
       })}
       <button className="ghost small" onClick={() => setParams({ rules: [...rules, { column: "", type: "not_blank" }] })}>Add validation</button>
+    </div>;
+  }
+  if (step.step_type === "pii_encrypt") {
+    const selected = params.columns as string[] ?? [];
+    const mode = String(params.mode ?? "encrypt");
+    return <div className="ruleStack">
+      <label>Mode<select value={mode} onChange={(event) => setParams({ ...params, mode: event.target.value })}><option value="encrypt">encrypt</option><option value="mask">mask</option></select></label>
+      {mode === "encrypt" && <label>Encryption key id<input value={String(params.key_id ?? "default")} onChange={(event) => setParams({ ...params, key_id: event.target.value })} placeholder="client_a" /></label>}
+      <div className="columnChips">{columns.map((column) => (
+        <button className={selected.includes(column) ? "selectedChip" : ""} key={column} onClick={() => {
+          const next = selected.includes(column) ? selected.filter((item) => item !== column) : [...selected, column];
+          setParams({ ...params, columns: next });
+        }}>{column}</button>
+      ))}</div>
+      {columns.length === 0 && <p className="emptyState">Load schema from source.</p>}
     </div>;
   }
   if (step.step_type === "join") {
@@ -1961,6 +1974,7 @@ const STEP_TYPES: { type: StepType; label: string; description: string }[] = [
   { type: "join", label: "Join / Merge", description: "Merge another datasource by matching keys" },
   { type: "cast", label: "Change Data Type", description: "Convert string, integer, float, date, datetime" },
   { type: "validate", label: "Validate Rows", description: "Reject bad records by standard rules and continue" },
+  { type: "pii_encrypt", label: "Encrypt PII", description: "Encrypt selected sensitive columns" },
   { type: "fillna", label: "Fill Null Values", description: "Fixed values, empty string, zero, forward/back fill" },
   { type: "derive", label: "Add Derived Column", description: "Create column with controlled formula builder" },
   { type: "blank_columns", label: "Add Blank Columns", description: "Create required output columns as blank/null/custom" },
@@ -2019,7 +2033,7 @@ const DATE_FORMAT_OPTIONS = [
   { value: "yy/mm/dd", label: "yy/mm/dd" },
 ];
 const AGG_FUNCS = ["sum", "mean", "min", "max", "count", "count_distinct", "first", "last"];
-const CONNECTION_TARGET_FIELDS = new Set(["schema", "table", "query", "path_pattern", "output_path_pattern", "rejected_path", "rejected_path_pattern", "operation", "format", "mode", "primary_key", "xlsx_data_sheet", "pii_columns", "auto_create_folders"]);
+const CONNECTION_TARGET_FIELDS = new Set(["schema", "table", "query", "path_pattern", "output_path_pattern", "rejected_path", "rejected_path_pattern", "operation", "format", "mode", "primary_key", "xlsx_data_sheet", "auto_create_folders"]);
 
 function defaultSteps(): TransformationStep[] {
   return [
@@ -2041,6 +2055,7 @@ function emptyStep(stepType: StepType): TransformationStep {
     join: { right_source_mode: "saved_source", right_source_id: "", right_source_config: {}, join_type: "left", left_key: "", right_key: "", right_columns: [], suffix: "_right" },
     cast: { casts: [] },
     validate: { rules: [] },
+    pii_encrypt: { columns: [], mode: "encrypt", key_id: "default" },
     fillna: { fills: [] },
     derive: { output_column: "", output_type: "float", left: { kind: "column", value: "" }, operator: "+", right: { kind: "constant", value: "" } },
     blank_columns: { columns: "" },
@@ -2343,7 +2358,6 @@ function placeholderFor(key: string, schema: SchemaProperty) {
   if (key === "host") return "10.10.0.20";
   if (key === "database") return "analytics";
   if (key === "query") return "select * from table";
-  if (key === "pii_columns") return "PARTY_MOBILE_NUMBER, PARTY_EMAIL";
   if (key === "remote_path") return "/home/sftp/base-folder";
   if (key.includes("path")) return "/path/to/file.csv";
   return humanize(key);

@@ -163,6 +163,42 @@ def test_validate_step_rejects_bad_rows_and_continues_pipeline():
     assert "due_date" in result.rejected_rows[0]["_rejected_column"]
 
 
+
+def test_pii_encrypt_step_encrypts_selected_columns():
+    from app.services.pii import decrypt_value
+
+    result = apply_transforms(
+        [{"name": "Ada", "mobile": "9876543210"}],
+        [
+            {
+                "id": "pii",
+                "step_type": "pii_encrypt",
+                "step_name": "Encrypt PII",
+                "parameters": {"columns": ["mobile"], "key_id": "client_a"},
+            }
+        ],
+    )
+
+    assert result[0]["name"] == "Ada"
+    assert result[0]["mobile"].startswith("enc:v1:client_a:")
+    assert decrypt_value(result[0]["mobile"]) == "9876543210"
+
+
+def test_pii_encrypt_step_can_mask_selected_columns():
+    result = apply_transforms(
+        [{"mobile": "9876543210"}],
+        [
+            {
+                "id": "pii",
+                "step_type": "pii_encrypt",
+                "step_name": "Encrypt PII",
+                "parameters": {"columns": ["mobile"], "mode": "mask"},
+            }
+        ],
+    )
+
+    assert result == [{"mobile": "*******210"}]
+
 def test_blank_columns_does_not_overwrite_existing_values():
     result = apply_transforms(
         [{"PARTY_MOBILE_NUMBER": "9876543210"}],

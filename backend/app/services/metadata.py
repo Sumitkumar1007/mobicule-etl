@@ -34,11 +34,7 @@ def source_options(source_key: str, config: dict[str, Any]) -> dict[str, list[st
     if source_key == "postgres_source":
         return {"tables": _postgres_tables(config)}
     if source_key == "sftp_source":
-        options = {"paths": _sftp_paths(config)}
-        sheets = _sftp_sheets(config)
-        if sheets:
-            options["sheets"] = sheets
-        return options
+        return {"paths": _sftp_paths(config)}
     return {}
 
 
@@ -130,7 +126,7 @@ def _sftp_columns(config: dict[str, Any]) -> list[str]:
         client = paramiko.SFTPClient.from_transport(transport)
         with client.open(remote_path, "r") as handle:
             if config.get("format") == "xlsx" or remote_path.endswith(".xlsx"):
-                return _xlsx_columns(handle.read(), config.get("sheet_name"))
+                return _xlsx_columns(handle.read(), config.get("sheet_name"), config.get("file_password"))
             first_line = handle.readline()
         return next(csv.reader([first_line]), [])
     finally:
@@ -166,30 +162,6 @@ def _sftp_paths(config: dict[str, Any]) -> list[str]:
         transport.close()
 
 
-def _sftp_sheets(config: dict[str, Any]) -> list[str]:
-    remote_path = str(config.get("remote_path") or "")
-    if not remote_path or not (config.get("format") == "xlsx" or remote_path.endswith(".xlsx")):
-        return []
-    try:
-        import paramiko
-        from openpyxl import load_workbook
-    except ImportError as exc:
-        raise RuntimeError("paramiko and openpyxl are required for SFTP XLSX metadata. Install backend requirements.") from exc
-
-    password = config.get("password") or None
-    private_key = config.get("private_key") or None
-    pkey = paramiko.RSAKey.from_private_key(io.StringIO(private_key)) if private_key else None
-    transport = paramiko.Transport((config["host"], int(config.get("port", 22))))
-    try:
-        transport.connect(username=config["username"], password=password, pkey=pkey)
-        client = paramiko.SFTPClient.from_transport(transport)
-        with client.open(remote_path, "r") as handle:
-            workbook = load_workbook(io.BytesIO(handle.read()), read_only=True, data_only=True)
-        return list(workbook.sheetnames)
-    finally:
-        transport.close()
-
-
 def _sftp_seed_path(config: dict[str, Any]) -> str:
     for key in ("remote_path", "path_pattern", "output_path_pattern"):
         value = str(config.get(key) or "").strip()
@@ -210,10 +182,35 @@ def _sftp_option_directory(client, seed: str) -> str:
     return posixpath.dirname(seed) or "."
 
 
-def _xlsx_columns(content: bytes, sheet_name: Any = None) -> list[str]:
+def _xlsx_columns(content: bytes, sheet_name: Any = None, password: Any = None) -> list[str]:
     from openpyxl import load_workbook
 
+    content = _decrypt_xlsx_if_needed(content, password)
     workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
-    sheet = workbook[str(sheet_name)] if sheet_name and str(sheet_name) in workbook.sheetnames else workbook.active
+    _validate_single_visible_sheet(workbook)
+    sheet = workbook.active
     first_row = next(sheet.iter_rows(values_only=True), [])
     return [str(value) for value in first_row if value is not None]
+
+
+def _decrypt_xlsx_if_needed(content: bytes, password: Any = None) -> bytes:
+    if not password:
+        return content
+    try:
+        import msoffcrypto
+    except ImportError as exc:
+        raise RuntimeError("Password-protected XLSX input requires msoffcrypto-tool. Install backend requirement and set file_password.") from exc
+    decrypted = io.BytesIO()
+    office_file = msoffcrypto.OfficeFile(io.BytesIO(content))
+    office_file.load_key(password=str(password))
+    office_file.decrypt(decrypted)
+    return decrypted.getvalue()
+
+
+def _validate_single_visible_sheet(workbook: Any) -> None:
+    sheet_names = list(workbook.sheetnames)
+    hidden = [sheet.title for sheet in workbook.worksheets if getattr(sheet, "sheet_state", "visible") != "visible"]
+    if hidden:
+        raise ValueError(f"XLSX input contains hidden sheets: {', '.join(hidden)}")
+    if len(sheet_names) != 1:
+        raise ValueError(f"XLSX input must contain exactly one sheet; found {len(sheet_names)}")

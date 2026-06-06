@@ -186,6 +186,13 @@ Important SFTP note:
 /home/sumit/sftp-test
 ```
 
+## XLSX Input Rules
+
+- XLSX input must have exactly one visible sheet.
+- If multiple sheets exist, job fails.
+- If any hidden sheet exists, job fails.
+- For password-protected XLSX, enter File password in SFTP source config. Backend needs `msoffcrypto-tool`.
+
 ## SFTP Date Pattern Examples
 
 Supported tokens:
@@ -211,7 +218,7 @@ The pattern is resolved when the pipeline run starts. Scheduled runs therefore p
 
 ## PII Column Configuration
 
-For destination config, enter PII columns as a comma-separated list:
+In Transform, add `Encrypt PII` step and select sensitive columns:
 
 ```text
 PARTY_MOBILE_NUMBER, PARTY_EMAIL
@@ -219,9 +226,9 @@ PARTY_MOBILE_NUMBER, PARTY_EMAIL
 
 Behavior:
 
-- PostgreSQL destination stores encrypted values with `enc:v1:` prefix.
-- File destinations and rejected/error files write masked values.
-- Keep `MOBIFLOW_PII_ENCRYPTION_KEY` stable across deployments.
+- Use `encrypt` mode to store encrypted `enc:v1:` values in downstream output.
+- Use `mask` mode to write masked values.
+- Keep `MOBIFLOW_PII_ENCRYPTION_KEYS` and `MOBIFLOW_PII_ENCRYPTION_KEY` fallback stable across deployments.
 
 ## ETL Audit Log
 
@@ -233,7 +240,7 @@ This is separate from user/application management audit logs. It tracks run id, 
 
 Open `Transform`.
 
-For a full detailed guide, see [TRANSFORMATION_GUIDE.md](TRANSFORMATION_GUIDE.md).
+For a full detailed guide, see [ETL_TOOL_GUIDE.md](ETL_TOOL_GUIDE.md).
 
 The screen has three areas:
 

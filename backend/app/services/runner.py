@@ -14,7 +14,6 @@ import httpx
 from app.connectors.registry import get_connector
 from app.db.database import db, decode, encode
 from app.services.sql_safety import validate_source_query
-from app.services.pii import encrypt_pii_rows, mask_pii_rows
 from app.services.transforms import preview_transforms
 
 logger = logging.getLogger(__name__)
@@ -164,7 +163,7 @@ def _extract_sftp(config: dict[str, Any]) -> list[dict[str, Any]]:
             with client.open(remote_path, "r") as handle:
                 content = handle.read()
             if config.get("format") == "xlsx" or remote_path.endswith(".xlsx"):
-                file_rows = _rows_from_xlsx(content if isinstance(content, bytes) else content.encode("utf-8"), config.get("sheet_name"))
+                file_rows = _rows_from_xlsx(content if isinstance(content, bytes) else content.encode("utf-8"), config.get("sheet_name"), config.get("file_password"))
             else:
                 if isinstance(content, bytes):
                     content = content.decode("utf-8")
@@ -180,7 +179,6 @@ def _extract_sftp(config: dict[str, Any]) -> list[dict[str, Any]]:
 def save_rejected_records(destination_key: str, config: dict[str, Any], rows: list[dict[str, Any]]) -> str | None:
     if not rows:
         return None
-    rows = mask_pii_rows(rows, config)
     if destination_key == "sftp_destination":
         remote_path = _rejected_write_path(config, _sftp_write_path(config))
         _write_sftp_rows(config, remote_path, rows)
@@ -199,7 +197,6 @@ def load(destination_key: str, config: dict[str, Any], rows: list[dict[str, Any]
     if connector.type != "destination":
         raise ValueError(f"{destination_key} is not a destination")
     if destination_key == "jsonl_file":
-        rows = mask_pii_rows(rows, config)
         path = Path(config.get("path", "data/output.jsonl"))
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
@@ -207,7 +204,6 @@ def load(destination_key: str, config: dict[str, Any], rows: list[dict[str, Any]
                 handle.write(json.dumps(row) + "\n")
         return len(rows)
     if destination_key == "csv_output":
-        rows = mask_pii_rows(rows, config)
         path = Path(config.get("path", "data/output.csv"))
         path.parent.mkdir(parents=True, exist_ok=True)
         if not rows:
@@ -232,7 +228,6 @@ def _load_postgres(config: dict[str, Any], rows: list[dict[str, Any]]) -> int:
     except ImportError as exc:
         raise RuntimeError("psycopg is required for PostgreSQL destination. Install backend requirements.") from exc
 
-    rows = encrypt_pii_rows(rows, config)
     schema = "".join(ch for ch in config.get("schema", "public") if ch.isalnum() or ch == "_")
     table = "".join(ch for ch in config["table"] if ch.isalnum() or ch == "_")
     columns = [str(key) for key in rows[0].keys()] if rows else []
@@ -286,7 +281,6 @@ def _load_sftp(config: dict[str, Any], rows: list[dict[str, Any]]) -> int:
         import paramiko
     except ImportError as exc:
         raise RuntimeError("paramiko is required for SFTP destination. Install backend requirements.") from exc
-    rows = mask_pii_rows(rows, config)
     remote_path = _sftp_write_path(config)
     if config.get("format") == "xlsx" or remote_path.endswith(".xlsx"):
         payload: str | bytes = _xlsx_from_rows(rows, config)
@@ -504,18 +498,44 @@ def _format_path_pattern(pattern: str) -> str:
     return pattern.format(**values)
 
 
-def _rows_from_xlsx(content: bytes, sheet_name: Any = None) -> list[dict[str, Any]]:
+def _rows_from_xlsx(content: bytes, sheet_name: Any = None, password: Any = None) -> list[dict[str, Any]]:
     import io
 
     from openpyxl import load_workbook
 
+    content = _decrypt_xlsx_if_needed(content, password)
     workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
-    sheet = workbook[str(sheet_name)] if sheet_name and str(sheet_name) in workbook.sheetnames else workbook.active
+    _validate_single_visible_sheet(workbook)
+    sheet = workbook.active
     rows = list(sheet.iter_rows(values_only=True))
     if not rows:
         return []
     headers = [str(value) for value in rows[0]]
     return [{headers[index]: value for index, value in enumerate(row)} for row in rows[1:]]
+
+
+def _decrypt_xlsx_if_needed(content: bytes, password: Any = None) -> bytes:
+    if not password:
+        return content
+    try:
+        import io
+        import msoffcrypto
+    except ImportError as exc:
+        raise RuntimeError("Password-protected XLSX input requires msoffcrypto-tool. Install backend requirement and set file_password.") from exc
+    decrypted = io.BytesIO()
+    office_file = msoffcrypto.OfficeFile(io.BytesIO(content))
+    office_file.load_key(password=str(password))
+    office_file.decrypt(decrypted)
+    return decrypted.getvalue()
+
+
+def _validate_single_visible_sheet(workbook: Any) -> None:
+    sheet_names = list(workbook.sheetnames)
+    hidden = [sheet.title for sheet in workbook.worksheets if getattr(sheet, "sheet_state", "visible") != "visible"]
+    if hidden:
+        raise ValueError(f"XLSX input contains hidden sheets: {', '.join(hidden)}")
+    if len(sheet_names) != 1:
+        raise ValueError(f"XLSX input must contain exactly one sheet; found {len(sheet_names)}")
 
 
 def _xlsx_from_rows(rows: list[dict[str, Any]], config: dict[str, Any] | None = None) -> bytes:

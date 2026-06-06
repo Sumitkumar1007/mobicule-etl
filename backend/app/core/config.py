@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     allow_custom_transforms: bool = False
     scheduler_lock_enabled: bool = True
     pii_encryption_key: str | None = None
+    pii_encryption_keys: str | None = None
 
     @property
     def is_production(self) -> bool:

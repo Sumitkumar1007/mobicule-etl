@@ -99,7 +99,7 @@ frontend/
   src/styles.css
 docs/
   SOP.md
-  TRANSFORMATION_GUIDE.md
+  ETL_TOOL_GUIDE.md
   TEAM_TECHNICAL_OVERVIEW.md
 deploy/systemd/
 ```
@@ -228,6 +228,8 @@ PostgreSQL destination supports:
 - append insert
 - upsert when `mode=upsert` and `primary_key` is set
 
+XLSX input policy: runner and metadata reject workbooks with multiple sheets or hidden sheets. Password-protected XLSX uses `file_password` and optional `msoffcrypto-tool` decryption.
+
 SFTP source supports:
 
 - single `remote_path`
@@ -311,13 +313,13 @@ Resolution happens when the scheduled/manual run executes, not when the pipeline
 
 Location: `backend/app/services/pii.py`
 
-Destination configs can include `pii_columns` as a comma-separated string or list. Runner behavior:
+Transformation step `pii_encrypt` takes `columns` and `mode`. Runner behavior:
 
-- PostgreSQL destination calls `encrypt_pii_rows()` before SQL insert/upsert.
-- CSV/JSONL/SFTP destinations call `mask_pii_rows()` before file writes.
-- Rejected/error record files are masked through `save_rejected_records()`.
+- `mode=encrypt` applies `encrypt_value()` to selected columns.
+- `mode=mask` applies `mask_value()` to selected columns.
+- Because this is a transform step, protection happens before any destination write.
 
-Encrypted values are stored with `enc:v1:` prefix. The key is derived from `MOBIFLOW_PII_ENCRYPTION_KEY`; if unset, the app falls back to local secrets, which is not recommended for production.
+Encrypted values are stored with `enc:v1:<key_id>:` prefix. The step `key_id` is resolved from `MOBIFLOW_PII_ENCRYPTION_KEYS`, with `MOBIFLOW_PII_ENCRYPTION_KEY` as fallback. Local-secret fallback is not recommended for production.
 
 ## ETL Audit Log
 

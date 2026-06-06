@@ -1593,9 +1593,13 @@ body,
 }
 
 .rail {
+  position: sticky;
+  top: 0;
   display: flex;
   flex-direction: column;
+  height: 100vh;
   min-height: 100vh;
+  overflow: hidden;
   background: var(--sidebar);
   border-right: 1px solid var(--line);
   box-shadow: 8px 0 30px rgba(31, 44, 60, 0.04);
@@ -1657,8 +1661,10 @@ nav button.active {
   padding: 34px 40px;
 }
 .railFooter {
+  flex-shrink: 0;
   padding: 12px;
   border-top: 1px solid var(--line);
+  background: var(--sidebar);
 }
 
 .logoutButton {

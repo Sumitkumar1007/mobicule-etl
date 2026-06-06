@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from app.core.config import get_settings
+from app.services.pii import encrypt_value, mask_value
 
 
 STEP_ORDER = {
@@ -16,17 +17,18 @@ STEP_ORDER = {
     "join": 3,
     "cast": 4,
     "validate": 5,
-    "fillna": 6,
-    "derive": 7,
-    "blank_columns": 8,
-    "filter": 9,
-    "value_map": 10,
-    "groupby": 11,
-    "pivot": 12,
-    "custom": 13,
-    "deduplicate": 14,
-    "reorder": 15,
-    "sort": 16,
+    "pii_encrypt": 6,
+    "fillna": 7,
+    "derive": 8,
+    "blank_columns": 9,
+    "filter": 10,
+    "value_map": 11,
+    "groupby": 12,
+    "pivot": 13,
+    "custom": 14,
+    "deduplicate": 15,
+    "reorder": 16,
+    "sort": 17,
 }
 
 INTERNAL_ROW_ID = "__mobiflow_original_row_id"
@@ -175,6 +177,8 @@ class TransformationExecutor:
             return self.apply_cast(df, params)
         if step_type == "validate":
             return self.apply_validate(df, step)
+        if step_type == "pii_encrypt":
+            return self.apply_pii_encrypt(df, params)
         if step_type == "fillna":
             return self.apply_fillna(df, params)
         if step_type == "derive":
@@ -276,6 +280,26 @@ class TransformationExecutor:
         rejected = df.loc[list(errors_by_index.keys())].copy()
         self.rejections.reject_validation_rows(rejected, step["step_name"], errors_by_index)
         return df.drop(index=list(errors_by_index.keys())).copy()
+
+    def apply_pii_encrypt(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
+        columns = params.get("columns") or []
+        if isinstance(columns, str):
+            columns = _split_column_names(columns)
+        selected = [str(column).strip() for column in columns if str(column).strip()]
+        if not selected:
+            return df
+        missing = [column for column in selected if column not in df.columns]
+        if missing:
+            raise ValueError(f"Unknown PII column(s): {', '.join(missing)}")
+        mode = str(params.get("mode") or "encrypt").strip().lower()
+        key_id = str(params.get("key_id") or "default").strip() or "default"
+        result = df.copy()
+        for column in selected:
+            if mode == "mask":
+                result[column] = result[column].map(mask_value)
+            else:
+                result[column] = result[column].map(lambda value: encrypt_value(value, key_id))
+        return result
 
     def apply_fillna(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.DataFrame:
         result = df.copy()
@@ -586,6 +610,7 @@ def human_step_name(step_type: str) -> str:
         "join": "Join / Merge",
         "cast": "Change Data Type",
         "validate": "Validate Rows",
+        "pii_encrypt": "Encrypt PII",
         "fillna": "Fill Null Values",
         "derive": "Add Derived Column",
         "blank_columns": "Add Blank Columns",

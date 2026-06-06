@@ -101,7 +101,7 @@ Transform steps:
 - Rejected/error files can use `rejected_path` or `rejected_path_pattern`.
 - SFTP destination auto-creates missing output/rejected folders by default; `auto_create_folders=false` disables it.
 - `etl_audit_log` tracks pipeline run lifecycle; `audit_logs` remains app/user-management audit.
-- Destination `pii_columns` encrypts configured columns for PostgreSQL writes and masks those columns for file/rejected outputs. Encryption key comes from `MOBIFLOW_PII_ENCRYPTION_KEY`.
+- `Encrypt PII` transformation step lets users select columns for encryption or masking. Encryption key comes from step `key_id` mapped by `MOBIFLOW_PII_ENCRYPTION_KEYS`, with `MOBIFLOW_PII_ENCRYPTION_KEY` fallback.
 - PostgreSQL source with no raw query builds `SELECT * FROM "schema"."table" LIMIT 1000`.
 - PostgreSQL destination supports append, upsert, and truncate-insert.
 

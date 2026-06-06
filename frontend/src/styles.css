@@ -83,12 +83,6 @@ textarea {
   justify-self: start;
 }
 
-.topbarActions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-}
 
 .userBadge {
   border: 1px solid #dce4df;
@@ -166,13 +160,6 @@ nav button.active {
 
 }
 
-.topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  margin-bottom: 22px;
-}
 
 h1,
 h2,
@@ -259,6 +246,13 @@ h2 {
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 18px;
+}
+
+.panelActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .transformPalette {
@@ -1285,11 +1279,6 @@ nav button.active {
 
 }
 
-.topbar {
-  min-height: 72px;
-  margin-bottom: 24px;
-  padding: 0 4px;
-}
 
 .eyebrow {
   color: var(--muted);
@@ -1685,11 +1674,6 @@ nav button.active {
 }
 
 
-.topbar {
-  min-height: 58px;
-  margin-bottom: 22px;
-}
-
 h2 {
   color: #1f2d3d;
   font-size: 24px;
@@ -1880,7 +1864,6 @@ h2 {
     padding: 16px;
   }
 
-  .topbar,
   .builderTop {
     align-items: flex-start;
     flex-direction: column;

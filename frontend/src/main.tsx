@@ -695,15 +695,6 @@ function App() {
       </aside>
 
       <section className="workspace">
-        <header className="topbar">
-          <div>
-            <p className="eyebrow">Low-code data movement</p>
-          </div>
-          <div className="topbarActions">
-            {isAdmin && activeMenu === "pipelines" && <button className="primary" onClick={() => savePipeline().catch(showError)}>{editingPipelineId ? "Update pipeline" : "Save pipeline"}</button>}
-          </div>
-        </header>
-
         {showPasswordPanel && activeMenu === "access" && (
           <section className="panel accountPanel">
             <div className="panelHead">
@@ -902,16 +893,19 @@ function App() {
               <p className="eyebrow">Pipeline Management</p>
               <h2>{editingPipelineId ? `Edit Pipeline #${editingPipelineId}` : "Create Pipeline"}</h2>
             </div>
-            {isAdmin && editingPipelineId && <button className="ghost small" onClick={() => {
-              setEditingPipelineId(null);
-              setForm({
-                ...form,
-                name: "Customer pipeline",
-                transformation_id: "",
-                transformation_version: "latest",
-                schedule: "*/2 * * * *"
-              });
-            }}>New pipeline</button>}
+            {isAdmin && <div className="panelActions">
+              <button className="primary small" onClick={() => savePipeline().catch(showError)}>{editingPipelineId ? "Update pipeline" : "Save pipeline"}</button>
+              {editingPipelineId && <button className="ghost small" onClick={() => {
+                setEditingPipelineId(null);
+                setForm({
+                  ...form,
+                  name: "Customer pipeline",
+                  transformation_id: "",
+                  transformation_version: "latest",
+                  schedule: "*/2 * * * *"
+                });
+              }}>New pipeline</button>}
+            </div>}
           </div>
           <div className="formGrid two">
             <label>Name<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>

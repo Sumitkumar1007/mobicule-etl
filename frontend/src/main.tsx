@@ -276,6 +276,11 @@ function App() {
   }, [currentUser]);
 
   useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    document.querySelector(".workspace")?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [activeMenu]);
+
+  useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(null), 3000);
     return () => window.clearTimeout(timer);
@@ -1352,27 +1357,26 @@ function LoginPage({
     <main className="loginShell">
       <section className="loginPanel">
         <LogoImage className="loginLogo" />
-        <div>
-          <p className="eyebrow">ETL TOOL INHOUSE</p>
-          <h1>Sign in</h1>
-        </div>
-        <label>
-          Email
-          <input value={loginEmail} onChange={(event) => onEmail(event.target.value)} placeholder="admin@mobiflow.local" />
+        <h1>Welcome to mCollect ETL</h1>
+        <label className="loginField">
+          <span className="loginIcon userIcon" aria-hidden="true" />
+          <input value={loginEmail} onChange={(event) => onEmail(event.target.value)} placeholder="Username" />
         </label>
-        <label>
-          Password
+        <label className="loginField">
+          <span className="loginIcon lockIcon" aria-hidden="true" />
           <input
             type="password"
             value={loginPassword}
+            placeholder="Password"
             onChange={(event) => onPassword(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter") onLogin();
             }}
           />
         </label>
-        <button className="primary" onClick={onLogin}>Login</button>
+        <button className="primary loginButton" onClick={onLogin}>&#10003; Login</button>
       </section>
+      <section className="loginVisual" aria-hidden="true" />
       {toast && <button className={`toast ${toast.tone}`} onClick={() => onToast(null)}>{toast.text}</button>}
     </main>
   );

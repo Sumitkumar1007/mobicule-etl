@@ -693,10 +693,14 @@ textarea {
 }
 
 .builderTop {
+  position: sticky;
+  top: 12px;
+  z-index: 30;
   display: flex;
   justify-content: space-between;
   gap: 16px;
   align-items: center;
+  box-shadow: 0 8px 24px rgba(16, 24, 21, 0.08);
 }
 
 .builderMeta {
@@ -785,6 +789,26 @@ textarea {
   border-radius: 8px;
   background: #fbfdfb;
   padding: 14px;
+}
+
+.stepCard.hasError {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.12);
+}
+
+.stepValidationMessage {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.stepValidationMessage p {
+  margin: 0;
 }
 
 .stepCard.disabled {
@@ -899,7 +923,12 @@ textarea {
 }
 
 .previewControls {
+  position: sticky;
+  top: 64px;
+  z-index: 5;
   margin: 12px 0;
+  padding: 10px 0 12px;
+  background: #ffffff;
 }
 
 .ruleRow,
@@ -962,6 +991,7 @@ textarea {
   max-height: 560px;
   overflow: auto;
 }
+
 
 .dataPreview table {
   width: 100%;
@@ -2030,5 +2060,13 @@ section.workspace {
 
   .loginVisual {
     display: none;
+  }
+}
+
+@media (max-width: 1100px) {
+  .builderTop {
+    position: static;
+    top: auto;
+    box-shadow: none;
   }
 }

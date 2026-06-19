@@ -154,6 +154,7 @@ type TransformationPreview = {
 type ValidationResult = { errors: string[]; warnings: string[] };
 type Toast = { tone: "ok" | "bad"; text: string } | null;
 type Menu = "datasources" | "destinations" | "transforms" | "pipelines" | "runs" | "audit" | "access";
+type StepValidationState = { errors: string[]; warnings: string[] };
 
 function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(() => loadSession()?.user ?? null);
@@ -285,6 +286,13 @@ function App() {
     const timer = window.setTimeout(() => setToast(null), 3000);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  useEffect(() => {
+    const expectedPath = currentUser ? "/" : "/login";
+    if (window.location.pathname !== expectedPath) {
+      window.history.replaceState({}, "", expectedPath);
+    }
+  }, [currentUser]);
 
   useEffect(() => {
     if (!currentUser || activeMenu === "transforms") return;
@@ -864,11 +872,13 @@ function App() {
                 <div className="stepList">
                   {transformationDraft.steps.map((step, index) => {
                     const stepColumns = columnsBeforeStep(sourceColumns, transformationDraft.steps, index);
+                    const stepValidation = validationForStep(step, index, validationData);
                     return <StepCard
                       key={step.id}
                       step={step}
                       index={index}
                       columns={stepColumns}
+                      validation={stepValidation}
                       sourceResources={sourceResources}
                       activeSourceResource={sourceResources.find((item) => String(item.id) === transformationDraft.source_id)}
                       onChange={(next) => updateStep(step.id, () => next)}
@@ -1292,10 +1302,9 @@ function DatasetTargetEditor({ title, resource, value, options, onChange }: { ti
     </div>;
   }
   if (resource.connector_key === "sftp_destination") {
-    const fileOptions = sftpPathOptions(resource, options.paths, String(value.remote_path ?? ""));
     const isXlsx = String(value.format ?? "csv") === "xlsx" || String(value.remote_path || value.output_path_pattern || "").endsWith(".xlsx");
     return <div className="formGrid two">
-      <label>{title} output path<SelectOrInput value={String(value.remote_path ?? "")} options={fileOptions} placeholder="/out/result.csv" onChange={(next) => onChange({ ...value, remote_path: next, output_path_pattern: "" })} /></label>
+      <label>{title} output path<input value={String(value.remote_path ?? "")} onChange={(event) => onChange({ ...value, remote_path: event.target.value, output_path_pattern: "" })} placeholder="/out/result.csv" /></label>
       <label>Output date pattern<input value={String(value.output_path_pattern ?? "")} onChange={(event) => onChange({ ...value, output_path_pattern: event.target.value, remote_path: "" })} placeholder="/out/result_{YYYY}{MM}{DD}.xlsx" />{Boolean(value.output_path_pattern) && <PatternPreview pattern={String(value.output_path_pattern)} />}</label>
       <label>Rejected/error path<input value={String(value.rejected_path ?? "")} onChange={(event) => onChange({ ...value, rejected_path: event.target.value, rejected_path_pattern: "" })} placeholder="/err/rejected.csv" /></label>
       <label>Rejected/error pattern<input value={String(value.rejected_path_pattern ?? "")} onChange={(event) => onChange({ ...value, rejected_path_pattern: event.target.value, rejected_path: "" })} placeholder="/err/rejected_{YYYY}{MM}{DD}_{timestamp}.csv" />{Boolean(value.rejected_path_pattern) && <PatternPreview pattern={String(value.rejected_path_pattern)} />}</label>
@@ -1406,6 +1415,7 @@ function StepCard({
   step,
   index,
   columns,
+  validation,
   sourceResources,
   activeSourceResource,
   onChange,
@@ -1418,6 +1428,7 @@ function StepCard({
   step: TransformationStep;
   index: number;
   columns: string[];
+  validation: StepValidationState;
   sourceResources: Resource[];
   activeSourceResource?: Resource;
   onChange: (step: TransformationStep) => void;
@@ -1428,7 +1439,7 @@ function StepCard({
   readOnly?: boolean;
 }) {
   return (
-    <article className={`stepCard ${step.is_enabled ? "" : "disabled"}`}>
+    <article className={`stepCard ${step.is_enabled ? "" : "disabled"} ${validation.errors.length ? "hasError" : ""}`}>
       <div className="stepHead">
         <span>{index + 1}</span>
         <div>
@@ -1438,6 +1449,11 @@ function StepCard({
         <label className="toggle"><input type="checkbox" disabled={readOnly} checked={step.is_enabled} onChange={(event) => onChange({ ...step, is_enabled: event.target.checked })} />Enabled</label>
       </div>
       <StepForm step={step} columns={columns} sourceResources={sourceResources} activeSourceResource={activeSourceResource} onChange={readOnly ? () => undefined : onChange} />
+      {validation.errors.length > 0 && (
+        <div className="stepValidationMessage" role="alert">
+          {validation.errors.map((message) => <p key={message}>{message}</p>)}
+        </div>
+      )}
       <label>Step note<input readOnly={readOnly} value={step.note ?? ""} onChange={(event) => onChange({ ...step, note: event.target.value })} placeholder="Standardize phone format" /></label>
       {!readOnly && <div className="stepActions">
         <button className="ghost small" onClick={onMoveUp} title="Move up">↑</button>
@@ -1752,6 +1768,17 @@ function IssueList({ validation, warnings }: { validation: ValidationResult | nu
     {combinedWarnings.map((item) => <p className="warningText" key={item}>Warning: {item}</p>)}
     {!errors.length && !combinedWarnings.length && <p className="emptyState">No validation issues.</p>}
   </div>;
+}
+
+function validationForStep(step: TransformationStep, index: number, validation: ValidationResult | null): StepValidationState {
+  const stepPrefix = `Step ${index + 1} `;
+  const errors = (validation?.errors ?? [])
+    .filter((message) => message.startsWith(stepPrefix))
+    .map((message) => message.slice(stepPrefix.length).trim());
+  const warnings = (validation?.warnings ?? [])
+    .filter((message) => message.includes(step.step_name))
+    .map((message) => message.trim());
+  return { errors, warnings };
 }
 
 function Metric({ label, value }: { label: string; value: string | number }) {

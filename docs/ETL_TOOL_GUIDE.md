@@ -34,7 +34,7 @@ Admin:
 - Manage destinations.
 - Create, edit, validate, preview, save, publish transformations.
 - Create and run pipelines.
-- Manage users in Access Control.
+- Superuser-only user management in Access Control.
 
 Support:
 
@@ -797,7 +797,7 @@ Use audit log for daily production checks:
 
 ## 11. Access Control
 
-Open `Access Control` as admin.
+Open `Access Control` as superuser.
 
 User parameters:
 
@@ -806,7 +806,7 @@ User parameters:
 | `name` | User display name | `Sumit Yadav` |
 | `email` | Login email | `sumit@example.com` |
 | `password` | Initial password | secret |
-| `role` | User role | `admin`, `support`, `viewer` |
+| `role` | User role | `superuser`, `admin`, `support`, `viewer` |
 
 Users can change their password from the account/password panel when available.
 

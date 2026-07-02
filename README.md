@@ -13,7 +13,7 @@ MobiFlow ETL is a UI-driven ETL control plane. Users create datasources, destina
 
 ## Current MVP Features
 
-- Password login with backend-issued bearer tokens, logout, and admin-only user creation.
+- Password login with backend-issued bearer tokens, logout, and superuser-only user creation.
 - Replaceable brand logo in sidebar and login page.
 - Datasource and destination management.
 - Transformation Builder with schema explorer, step cards, preview, validation, draft, and publish.
@@ -65,7 +65,7 @@ MOBIFLOW_BOOTSTRAP_ADMIN_PASSWORD=change-me-with-strong-password
 MOBIFLOW_PII_ENCRYPTION_KEY=change-me-to-a-long-random-secret
 ```
 
-The current local app reads these values from `.env`. On first backend start, the bootstrap admin user is created. If the admin already exists and has no password hash, the backend sets this password during startup.
+The current local app reads these values from `.env`. On first backend start, the bootstrap account is created as a superuser. If that user already exists and has no password hash, the backend sets this password during startup.
 
 For this local workspace, the bootstrap login is:
 

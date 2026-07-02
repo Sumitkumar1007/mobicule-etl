@@ -99,7 +99,7 @@ def connectors() -> list[ConnectorDefinition]:
 
 @router.post("/connectors/test", response_model=ConnectorTestResponse)
 def connector_test(payload: ConnectorTestRequest, request: Request) -> ConnectorTestResponse:
-    require_role(request, {"admin"})
+    require_role(request, {"admin", "superuser"})
     try:
         get_connector(payload.connector_key)
         message = test_connection(payload.connector_key, payload.config)
@@ -115,7 +115,7 @@ def sources() -> list[Resource]:
 
 @router.post("/sources", response_model=Resource)
 def create_source(payload: ResourceCreate, request: Request) -> Resource:
-    require_role(request, {"admin"})
+    require_role(request, {"admin", "superuser"})
     resource = _create_resource("source", payload)
     _audit(request, "create", "source", resource.id, {"name": resource.name, "connector_key": resource.connector_key})
     return resource
@@ -123,7 +123,7 @@ def create_source(payload: ResourceCreate, request: Request) -> Resource:
 
 @router.put("/sources/{resource_id}", response_model=Resource)
 def update_source(resource_id: int, payload: ResourceUpdate, request: Request) -> Resource:
-    require_role(request, {"admin"})
+    require_role(request, {"admin", "superuser"})
     resource = _update_resource("source", resource_id, payload)
     _audit(request, "update", "source", resource.id, {"name": resource.name, "connector_key": resource.connector_key})
     return resource
@@ -131,7 +131,7 @@ def update_source(resource_id: int, payload: ResourceUpdate, request: Request) -
 
 @router.delete("/sources/{resource_id}")
 def delete_source(resource_id: int, request: Request) -> dict[str, str]:
-    require_role(request, {"admin"})
+    require_role(request, {"admin", "superuser"})
     _delete_resource("source", resource_id)
     _audit(request, "delete", "source", resource_id, {})
     return {"status": "deleted"}
@@ -144,7 +144,7 @@ def destinations() -> list[Resource]:
 
 @router.post("/destinations", response_model=Resource)
 def create_destination(payload: ResourceCreate, request: Request) -> Resource:
-    require_role(request, {"admin"})
+    require_role(request, {"admin", "superuser"})
     resource = _create_resource("destination", payload)
     _audit(request, "create", "destination", resource.id, {"name": resource.name, "connector_key": resource.connector_key})
     return resource
@@ -152,7 +152,7 @@ def create_destination(payload: ResourceCreate, request: Request) -> Resource:
 
 @router.put("/destinations/{resource_id}", response_model=Resource)
 def update_destination(resource_id: int, payload: ResourceUpdate, request: Request) -> Resource:
-    require_role(request, {"admin"})
+    require_role(request, {"admin", "superuser"})
     resource = _update_resource("destination", resource_id, payload)
     _audit(request, "update", "destination", resource.id, {"name": resource.name, "connector_key": resource.connector_key})
     return resource
@@ -160,7 +160,7 @@ def update_destination(resource_id: int, payload: ResourceUpdate, request: Reque
 
 @router.delete("/destinations/{resource_id}")
 def delete_destination(resource_id: int, request: Request) -> dict[str, str]:
-    require_role(request, {"admin"})
+    require_role(request, {"admin", "superuser"})
     _delete_resource("destination", resource_id)
     _audit(request, "delete", "destination", resource_id, {})
     return {"status": "deleted"}
@@ -175,7 +175,7 @@ def pipelines() -> list[Pipeline]:
 
 @router.post("/pipelines", response_model=Pipeline)
 def create_pipeline(payload: PipelineCreate, request: Request) -> Pipeline:
-    require_role(request, {"admin"})
+    require_role(request, {"admin", "superuser"})
     try:
         get_connector(payload.source_key)
         get_connector(payload.destination_key)
@@ -210,7 +210,7 @@ def create_pipeline(payload: PipelineCreate, request: Request) -> Pipeline:
 
 @router.put("/pipelines/{pipeline_id}", response_model=Pipeline)
 def update_pipeline(pipeline_id: int, payload: PipelineUpdate, request: Request) -> Pipeline:
-    require_role(request, {"admin"})
+    require_role(request, {"admin", "superuser"})
     current = get_pipeline(pipeline_id)
     data = current.model_dump()
     update = payload.model_dump(exclude_unset=True)
@@ -247,7 +247,7 @@ def update_pipeline(pipeline_id: int, payload: PipelineUpdate, request: Request)
 
 @router.delete("/pipelines/{pipeline_id}")
 def delete_pipeline(pipeline_id: int, request: Request) -> dict[str, str]:
-    require_role(request, {"admin"})
+    require_role(request, {"admin", "superuser"})
     with db() as conn:
         conn.execute("DELETE FROM pipelines WHERE id=?", (pipeline_id,))
     _audit(request, "delete", "pipeline", pipeline_id, {})
@@ -276,7 +276,7 @@ def transformation_versions() -> list[TransformationVersion]:
 
 @router.post("/transformations", response_model=Transformation)
 def create_transformation(payload: TransformationCreate, request: Request) -> Transformation:
-    require_role(request, {"admin"})
+    require_role(request, {"admin", "superuser"})
     with db() as conn:
         row = conn.execute(
             """
@@ -310,7 +310,7 @@ def get_transformation(transformation_id: int) -> Transformation:
 
 @router.put("/transformations/{transformation_id}", response_model=Transformation)
 def update_transformation(transformation_id: int, payload: TransformationUpdate, request: Request) -> Transformation:
-    require_role(request, {"admin"})
+    require_role(request, {"admin", "superuser"})
     transformation = _update_transformation_record(transformation_id, payload)
     _audit(request, "update", "transformation", transformation.id, {"name": transformation.name, "status": transformation.status})
     return transformation
@@ -346,7 +346,7 @@ def _update_transformation_record(transformation_id: int, payload: Transformatio
 
 @router.delete("/transformations/{transformation_id}")
 def delete_transformation(transformation_id: int, request: Request) -> dict[str, str]:
-    require_role(request, {"admin"})
+    require_role(request, {"admin", "superuser"})
     with db() as conn:
         conn.execute("DELETE FROM transformations WHERE id=?", (transformation_id,))
     _audit(request, "delete", "transformation", transformation_id, {})
@@ -355,7 +355,7 @@ def delete_transformation(transformation_id: int, request: Request) -> dict[str,
 
 @router.post("/transformations/{transformation_id}/steps", response_model=Transformation)
 def add_transformation_step(transformation_id: int, step: dict[str, object], request: Request) -> Transformation:
-    require_role(request, {"admin"})
+    require_role(request, {"admin", "superuser"})
     transformation = get_transformation(transformation_id)
     steps = [item.model_dump() for item in transformation.steps]
     steps.append(step)
@@ -364,7 +364,7 @@ def add_transformation_step(transformation_id: int, step: dict[str, object], req
 
 @router.put("/transformations/{transformation_id}/steps/reorder", response_model=Transformation)
 def reorder_transformation_steps(transformation_id: int, payload: dict[str, list[str]], request: Request) -> Transformation:
-    require_role(request, {"admin"})
+    require_role(request, {"admin", "superuser"})
     transformation = get_transformation(transformation_id)
     order = payload.get("step_ids", [])
     by_id = {item.id: item.model_dump() for item in transformation.steps}
@@ -375,7 +375,7 @@ def reorder_transformation_steps(transformation_id: int, payload: dict[str, list
 
 @router.put("/transformations/{transformation_id}/steps/{step_id}", response_model=Transformation)
 def update_transformation_step(transformation_id: int, step_id: str, step: dict[str, object], request: Request) -> Transformation:
-    require_role(request, {"admin"})
+    require_role(request, {"admin", "superuser"})
     transformation = get_transformation(transformation_id)
     steps = [item.model_dump() for item in transformation.steps]
     steps = [step if item["id"] == step_id else item for item in steps]
@@ -384,7 +384,7 @@ def update_transformation_step(transformation_id: int, step_id: str, step: dict[
 
 @router.delete("/transformations/{transformation_id}/steps/{step_id}", response_model=Transformation)
 def delete_transformation_step(transformation_id: int, step_id: str, request: Request) -> Transformation:
-    require_role(request, {"admin"})
+    require_role(request, {"admin", "superuser"})
     transformation = get_transformation(transformation_id)
     steps = [item.model_dump() for item in transformation.steps if item.id != step_id]
     return _update_transformation_record(transformation_id, TransformationUpdate(steps=steps))
@@ -448,7 +448,7 @@ def validate_transformation(transformation_id: int) -> TransformationValidationR
 
 @router.post("/transformations/{transformation_id}/publish", response_model=Transformation)
 def publish_transformation(transformation_id: int, request: Request) -> Transformation:
-    require_role(request, {"admin"})
+    require_role(request, {"admin", "superuser"})
     validation = validate_transformation(transformation_id)
     if validation.errors:
         raise HTTPException(status_code=400, detail="; ".join(validation.errors))
@@ -488,7 +488,7 @@ def get_pipeline(pipeline_id: int) -> Pipeline:
 
 @router.post("/pipelines/{pipeline_id}/runs", response_model=Run)
 def start_run(pipeline_id: int, request: Request) -> Run:
-    require_role(request, {"admin", "support"})
+    require_role(request, {"superuser", "admin", "support"})
     with db() as conn:
         exists = conn.execute("SELECT 1 FROM pipelines WHERE id=?", (pipeline_id,)).fetchone()
     if exists is None:
@@ -501,7 +501,7 @@ def start_run(pipeline_id: int, request: Request) -> Run:
 
 @router.post("/runs/{run_id}/stop", response_model=Run)
 def stop_run(run_id: int, request: Request) -> Run:
-    require_role(request, {"admin", "support"})
+    require_role(request, {"superuser", "admin", "support"})
     with db() as conn:
         conn.execute(
             """
@@ -559,7 +559,7 @@ def download_logs(run_id: int) -> PlainTextResponse:
 
 @router.get("/users", response_model=list[User])
 def users(request: Request) -> list[User]:
-    require_role(request, {"admin"})
+    require_role(request, {"superuser"})
     with db() as conn:
         rows = conn.execute("SELECT id, name, email, role, created_at FROM users ORDER BY id DESC").fetchall()
     return [User(**dict(row)) for row in rows]
@@ -567,7 +567,7 @@ def users(request: Request) -> list[User]:
 
 @router.post("/users", response_model=User)
 def create_user(payload: UserCreate, request: Request) -> User:
-    require_role(request, {"admin"})
+    require_role(request, {"superuser"})
     with db() as conn:
         row = conn.execute(
             """
@@ -584,7 +584,7 @@ def create_user(payload: UserCreate, request: Request) -> User:
 
 @router.put("/users/{user_id}", response_model=User)
 def update_user(user_id: int, payload: UserUpdate, request: Request) -> User:
-    require_role(request, {"admin"})
+    require_role(request, {"superuser"})
     update = payload.model_dump(exclude_unset=True)
     if not update:
         raise HTTPException(status_code=400, detail="No user changes provided")
@@ -621,7 +621,7 @@ def update_user(user_id: int, payload: UserUpdate, request: Request) -> User:
 
 @router.delete("/users/{user_id}")
 def delete_user(user_id: int, request: Request) -> dict[str, str]:
-    require_role(request, {"admin"})
+    require_role(request, {"superuser"})
     actor = current_user(request)
     if actor.id == user_id:
         raise HTTPException(status_code=400, detail="You cannot delete your own user")
@@ -629,10 +629,10 @@ def delete_user(user_id: int, request: Request) -> dict[str, str]:
         row = conn.execute("SELECT email, role FROM users WHERE id=?", (user_id,)).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="User not found")
-        if dict(row)["role"] == "admin":
-            admins = conn.execute("SELECT COUNT(*) AS count FROM users WHERE role='admin'").fetchone()
-            if int(dict(admins)["count"]) <= 1:
-                raise HTTPException(status_code=400, detail="At least one admin user is required")
+        if dict(row)["role"] == "superuser":
+            superusers = conn.execute("SELECT COUNT(*) AS count FROM users WHERE role='superuser'").fetchone()
+            if int(dict(superusers)["count"]) <= 1:
+                raise HTTPException(status_code=400, detail="At least one superuser is required")
         conn.execute("DELETE FROM users WHERE id=?", (user_id,))
     _audit(request, "delete", "user", user_id, {"email": dict(row)["email"]})
     return {"status": "deleted"}
@@ -640,7 +640,7 @@ def delete_user(user_id: int, request: Request) -> dict[str, str]:
 
 @router.get("/audit-logs", response_model=list[AuditLog])
 def audit_logs(request: Request) -> list[AuditLog]:
-    require_role(request, {"admin"})
+    require_role(request, {"admin", "superuser"})
     with db() as conn:
         rows = conn.execute("SELECT * FROM audit_logs ORDER BY id DESC LIMIT 200").fetchall()
     return [_audit_log_from_row(row) for row in rows]
@@ -648,7 +648,7 @@ def audit_logs(request: Request) -> list[AuditLog]:
 
 @router.get("/etl-audit-logs", response_model=list[EtlAuditLog])
 def etl_audit_logs(request: Request) -> list[EtlAuditLog]:
-    require_role(request, {"admin", "support"})
+    require_role(request, {"superuser", "admin", "support"})
     with db() as conn:
         rows = conn.execute("SELECT * FROM etl_audit_log ORDER BY id DESC LIMIT 200").fetchall()
     return [EtlAuditLog(**dict(row)) for row in rows]

@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 ConnectorType = Literal["source", "destination"]
 RunStatus = Literal["queued", "running", "succeeded", "failed"]
-UserRole = Literal["admin", "support", "viewer"]
+UserRole = Literal["superuser", "admin", "support", "viewer"]
 
 
 class ConnectorDefinition(BaseModel):

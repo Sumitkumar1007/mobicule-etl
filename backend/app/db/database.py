@@ -118,7 +118,7 @@ def init_db() -> None:
                 id SERIAL PRIMARY KEY,
                 name TEXT NOT NULL,
                 email TEXT NOT NULL UNIQUE,
-                role TEXT NOT NULL CHECK(role IN ('admin', 'support', 'viewer')),
+                role TEXT NOT NULL CHECK(role IN ('superuser', 'admin', 'support', 'viewer')),
                 password_hash TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
@@ -207,6 +207,13 @@ def init_db() -> None:
             """
         )
         conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT")
+        conn.execute("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check")
+        conn.execute(
+            """
+            ALTER TABLE users
+            ADD CONSTRAINT users_role_check CHECK(role IN ('superuser', 'admin', 'support', 'viewer'))
+            """
+        )
         conn.execute("ALTER TABLE pipelines ADD COLUMN IF NOT EXISTS source_id INTEGER REFERENCES resources(id) ON DELETE SET NULL")
         conn.execute("ALTER TABLE pipelines ADD COLUMN IF NOT EXISTS destination_id INTEGER REFERENCES resources(id) ON DELETE SET NULL")
         conn.execute("ALTER TABLE pipelines ADD COLUMN IF NOT EXISTS transformation_id INTEGER REFERENCES transformations(id) ON DELETE SET NULL")
@@ -241,14 +248,14 @@ def init_db() -> None:
             SELECT ?, ?, ?, ?
             WHERE NOT EXISTS (SELECT 1 FROM users WHERE email=?)
             """,
-            ("Admin", settings.bootstrap_admin_email, "admin", bootstrap_hash, settings.bootstrap_admin_email),
+            ("Superuser", settings.bootstrap_admin_email, "superuser", bootstrap_hash, settings.bootstrap_admin_email),
         )
         if bootstrap_hash:
             conn.execute(
                 """
                 UPDATE users
-                SET password_hash=?
-                WHERE email=? AND (password_hash IS NULL OR password_hash='')
+                SET password_hash=?, role='superuser'
+                WHERE email=? AND (password_hash IS NULL OR password_hash='' OR role<>'superuser')
                 """,
                 (bootstrap_hash, settings.bootstrap_admin_email),
             )

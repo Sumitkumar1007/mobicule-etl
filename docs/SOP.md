@@ -6,7 +6,7 @@ This SOP explains how to use MobiFlow ETL to configure data movement from a sour
 
 Target users:
 
-- Admins who configure users, sources, destinations, transformations, and pipelines.
+- Superusers who configure users, sources, destinations, transformations, and pipelines.
 - Support users who preview, validate, and run pipelines.
 - Viewers who inspect pipelines and logs.
 
@@ -34,7 +34,7 @@ The login screen appears first.
 2. Enter password.
 3. Click `Login`.
 
-Default local bootstrap user:
+Default local bootstrap superuser:
 
 ```text
 Email: admin@mobiflow.local
@@ -81,7 +81,7 @@ Left menu sections:
 - `Transform`: build low-code transformation steps.
 - `Pipelines`: attach source, transformation, destination, and schedule.
 - `Runs & Logs`: inspect execution history and step logs.
-- `Access Control`: create users and roles.
+- `Access Control`: superuser-only user and role management.
 
 ## 5.1 UI Screenshots
 

@@ -104,7 +104,7 @@ type User = {
   id: number;
   name: string;
   email: string;
-  role: "admin" | "support" | "viewer";
+  role: "superuser" | "admin" | "support" | "viewer";
   created_at: string;
 };
 type AuthSession = { token: string; user: User };
@@ -155,6 +155,15 @@ type ValidationResult = { errors: string[]; warnings: string[] };
 type Toast = { tone: "ok" | "bad"; text: string } | null;
 type Menu = "datasources" | "destinations" | "transforms" | "pipelines" | "runs" | "audit" | "access";
 type StepValidationState = { errors: string[]; warnings: string[] };
+type ScheduleMode = "manual" | "hourly" | "daily" | "weekly" | "monthly" | "custom";
+type ScheduleBuilder = {
+  mode: ScheduleMode;
+  everyHours: string;
+  time: string;
+  weekday: string;
+  dayOfMonth: string;
+  cron: string;
+};
 
 function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(() => loadSession()?.user ?? null);
@@ -207,6 +216,7 @@ function App() {
   const [userForm, setUserForm] = useState({ name: "", email: "", password: "", role: "viewer" as User["role"] });
   const [editingUserId, setEditingUserId] = useState<number | null>(null);
   const [passwordForm, setPasswordForm] = useState({ current_password: "", new_password: "", confirm_password: "" });
+  const [scheduleBuilder, setScheduleBuilder] = useState<ScheduleBuilder>(() => parseScheduleToBuilder(""));
   const [form, setForm] = useState({
     name: "Customer pipeline",
     source_id: "",
@@ -218,13 +228,14 @@ function App() {
     source_config: sampleConfigForKey("postgres_source"),
     destination_config: sampleConfigForKey("postgres_destination"),
     transforms: "[]",
-    schedule: "0 * * * *"
+    schedule: ""
   });
 
   const sources = connectors.filter((item) => item.type === "source");
   const destinations = connectors.filter((item) => item.type === "destination");
-  const isAdmin = currentUser?.role === "admin";
-  const canRun = currentUser?.role === "admin" || currentUser?.role === "support";
+  const isSuperuser = currentUser?.role === "superuser";
+  const isAdmin = currentUser?.role === "admin" || currentUser?.role === "superuser";
+  const canRun = currentUser?.role === "superuser" || currentUser?.role === "admin" || currentUser?.role === "support";
   const latestRun = runs[0];
   const metrics = useMemo(
     () => ({
@@ -247,7 +258,7 @@ function App() {
       api<TransformationVersion[]>("/transformation-versions"),
       api<Run[]>("/runs"),
       canRun ? api<EtlAuditLog[]>("/etl-audit-logs") : Promise.resolve([]),
-      isAdmin ? api<User[]>("/users") : Promise.resolve([])
+      isSuperuser ? api<User[]>("/users") : Promise.resolve([])
     ]);
     setConnectors(connectorData);
     setSourceResources(sourceData);
@@ -274,7 +285,7 @@ function App() {
   useEffect(() => {
     if (!currentUser) return;
     refresh().catch(showError);
-  }, [currentUser]);
+  }, [currentUser, isSuperuser, canRun]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
@@ -301,10 +312,10 @@ function App() {
   }, [currentUser, activeMenu]);
 
   useEffect(() => {
-    if (currentUser && currentUser.role !== "admin" && activeMenu === "access") {
+    if (currentUser && !["admin", "superuser"].includes(currentUser.role) && activeMenu === "access") {
       setActiveMenu("datasources");
     }
-    if (currentUser && !["admin", "support"].includes(currentUser.role) && activeMenu === "audit") {
+    if (currentUser && !["superuser", "admin", "support"].includes(currentUser.role) && activeMenu === "audit") {
       setActiveMenu("datasources");
     }
   }, [currentUser, activeMenu]);
@@ -364,7 +375,7 @@ function App() {
       transforms: selectedVersion ? stepsFromVersion(selectedVersion) : selectedTransformation?.steps ?? [],
       transformation_id: Number(form.transformation_id),
       transformation_version: selectedVersion ? selectedVersion.version_no : null,
-      schedule: form.schedule
+      schedule: normalizedSchedule(form.schedule)
     };
     await api<Pipeline>(editingPipelineId ? `/pipelines/${editingPipelineId}` : "/pipelines", {
       method: editingPipelineId ? "PUT" : "POST",
@@ -641,6 +652,12 @@ function App() {
     setToast({ tone: "bad", text: error instanceof Error ? error.message : "Request failed" });
   }
 
+  function applyScheduleBuilder(next: ScheduleBuilder) {
+    const schedule = buildScheduleCron(next);
+    setScheduleBuilder(next);
+    setForm((current) => ({ ...current, schedule }));
+  }
+
   async function login() {
     const session = await api<AuthSession>("/auth/login", {
       method: "POST",
@@ -912,19 +929,19 @@ function App() {
               <button className="primary small" onClick={() => savePipeline().catch(showError)}>{editingPipelineId ? "Update pipeline" : "Save pipeline"}</button>
               {editingPipelineId && <button className="ghost small" onClick={() => {
                 setEditingPipelineId(null);
+                setScheduleBuilder(parseScheduleToBuilder(""));
                 setForm({
                   ...form,
                   name: "Customer pipeline",
                   transformation_id: "",
                   transformation_version: "latest",
-                  schedule: "*/2 * * * *"
+                  schedule: ""
                 });
               }}>New pipeline</button>}
             </div>}
           </div>
-          <div className="formGrid two">
+          <div className="formGrid two pipelineFormGrid">
             <label>Name<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
-            <label>Cron schedule<input value={form.schedule} onChange={(event) => setForm({ ...form, schedule: event.target.value })} placeholder="0 * * * *" /></label>
             <label>
               Transformation
               <select value={form.transformation_id} onChange={(event) => {
@@ -947,6 +964,7 @@ function App() {
               </select>
             </label>}
           </div>
+          <ScheduleEditor value={scheduleBuilder} onChange={applyScheduleBuilder} />
           <div className="routePreview">
             <span>{sourceResources.find((item) => String(item.id) === form.source_id)?.name ?? "Source"}</span>
             <strong>→</strong>
@@ -968,12 +986,14 @@ function App() {
                 <span>#{pipeline.id}</span>
                 <strong>{pipeline.name}</strong>
                 <span>{labelFor(connectors, pipeline.source_key)} → {labelFor(connectors, pipeline.destination_key)}</span>
-                <span>{pipeline.schedule || "Manual"}</span>
+                <span>{describeSchedule(pipeline.schedule)}</span>
                 {activeRun && <span>{activeRun.status} #{activeRun.id}</span>}
                 <div className="pipelineActions">
                   {isAdmin && <label className="toggle smallToggle" title={pipeline.enabled ? "Enabled" : "Disabled"} aria-label={pipeline.enabled ? "Disable pipeline" : "Enable pipeline"}><input type="checkbox" checked={pipeline.enabled} onChange={(event) => setPipelineEnabled(pipeline, event.target.checked).catch(showError)} /></label>}
                   {!isAdmin && <span>{pipeline.enabled ? "Active" : "Inactive"}</span>}
                   {isAdmin && <button className="ghost small" onClick={() => {
+                    const nextSchedule = pipeline.schedule || "";
+                    setScheduleBuilder(parseScheduleToBuilder(nextSchedule));
                     setEditingPipelineId(pipeline.id);
                     setForm({
                       ...form,
@@ -987,7 +1007,7 @@ function App() {
                       source_config: JSON.stringify(pipeline.source_config, null, 2),
                       destination_config: JSON.stringify(pipeline.destination_config, null, 2),
                       transforms: JSON.stringify(pipeline.transforms, null, 2),
-                      schedule: pipeline.schedule || ""
+                      schedule: nextSchedule
                     });
                   }}>Edit</button>}
                   {canRun && activeRun && <button className="ghost small" onClick={() => stopRun(activeRun.id).catch(showError)}>Stop</button>}
@@ -1140,6 +1160,7 @@ function App() {
               <h2>Users and Roles</h2>
             </div>
           </div>
+          {isSuperuser ? <>
           <div className="formGrid three">
             <label>Name<input value={userForm.name} onChange={(event) => setUserForm({ ...userForm, name: event.target.value })} /></label>
             <label>Email<input value={userForm.email} onChange={(event) => setUserForm({ ...userForm, email: event.target.value })} /></label>
@@ -1147,6 +1168,7 @@ function App() {
             <label>
               Role
               <select value={userForm.role} onChange={(event) => setUserForm({ ...userForm, role: event.target.value as User["role"] })}>
+                <option value="superuser">Superuser</option>
                 <option value="admin">Admin</option>
                 <option value="support">Support</option>
                 <option value="viewer">Viewer</option>
@@ -1158,7 +1180,8 @@ function App() {
             {editingUserId && <button className="ghost" onClick={() => { setEditingUserId(null); setUserForm({ name: "", email: "", password: "", role: "viewer" }); }}>Cancel</button>}
           </div>
           <div className="roleGrid">
-            <RoleCard role="Admin" text="Full access, users, pipelines, schedules, runs, logs." />
+            <RoleCard role="Superuser" text="Manage users and full platform access." />
+            <RoleCard role="Admin" text="Manage pipelines, transformations, schedules, runs, and logs." />
             <RoleCard role="Support" text="Trigger pipelines and view pipelines/logs." />
             <RoleCard role="Viewer" text="Read-only access to pipelines and logs." />
           </div>
@@ -1174,6 +1197,7 @@ function App() {
               </div>
             ))}
           </div>
+          </> : <p className="emptyState">User management is restricted to superusers. Admin users can manage pipelines and ETL operations only.</p>}
         </section>
         </>}
         {previewOpen && (
@@ -1781,6 +1805,47 @@ function validationForStep(step: TransformationStep, index: number, validation: 
   return { errors, warnings };
 }
 
+function ScheduleEditor({ value, onChange }: { value: ScheduleBuilder; onChange: (value: ScheduleBuilder) => void }) {
+  const showTime = value.mode === "daily" || value.mode === "weekly" || value.mode === "monthly";
+  return <div className="scheduleEditor">
+    <label>Schedule type
+      <select value={value.mode} onChange={(event) => onChange(nextScheduleBuilder(value, event.target.value as ScheduleMode))}>
+        <option value="manual">Manual only</option>
+        <option value="hourly">Every few hours</option>
+        <option value="daily">Daily</option>
+        <option value="weekly">Weekly</option>
+        <option value="monthly">Monthly</option>
+        {value.mode === "custom" && <option value="custom">Custom cron</option>}
+      </select>
+    </label>
+    {value.mode === "hourly" && <label>Every how many hours
+      <select value={value.everyHours} onChange={(event) => onChange({ ...value, everyHours: event.target.value })}>
+        {[1, 2, 3, 4, 6, 8, 12].map((hours) => <option key={hours} value={String(hours)}>{hours} hour{hours === 1 ? "" : "s"}</option>)}
+      </select>
+    </label>}
+    {showTime && <label>Time
+      <input type="time" value={value.time} onChange={(event) => onChange({ ...value, time: event.target.value || "09:00" })} />
+    </label>}
+    {value.mode === "weekly" && <label>Day of week
+      <select value={value.weekday} onChange={(event) => onChange({ ...value, weekday: event.target.value })}>
+        {WEEKDAY_OPTIONS.map((day) => <option key={day.value} value={day.value}>{day.label}</option>)}
+      </select>
+    </label>}
+    {value.mode === "monthly" && <label>Day of month
+      <select value={value.dayOfMonth} onChange={(event) => onChange({ ...value, dayOfMonth: event.target.value })}>
+        {Array.from({ length: 31 }, (_, index) => index + 1).map((day) => <option key={day} value={String(day)}>{day}</option>)}
+      </select>
+    </label>}
+    {value.mode === "custom" && <label>Custom cron
+      <input value={value.cron} onChange={(event) => onChange({ ...value, cron: event.target.value })} placeholder="0 9 * * 1" />
+    </label>}
+    <div className="scheduleHint">
+      <strong>{describeSchedule(buildScheduleCron(value))}</strong>
+      <span>{buildScheduleCron(value) || "No schedule. Pipeline runs manually only."}</span>
+    </div>
+  </div>;
+}
+
 function Metric({ label, value }: { label: string; value: string | number }) {
   return <div className="metric"><span>{label}</span><strong>{value}</strong></div>;
 }
@@ -1996,20 +2061,20 @@ function GeneratedConfigForm({
 const STEP_TYPES: { type: StepType; label: string; description: string }[] = [
   { type: "select", label: "Select Columns", description: "Keep required columns only" },
   { type: "rename", label: "Rename Columns", description: "Map source names to destination names" },
+  { type: "reorder", label: "Reorder Columns", description: "Control final output column order" },
+  { type: "blank_columns", label: "Add Blank Columns", description: "Create required output columns as blank/null/custom" },
   { type: "join", label: "Join / Merge", description: "Merge another datasource by matching keys" },
   { type: "cast", label: "Change Data Type", description: "Convert string, integer, float, date, datetime" },
   { type: "validate", label: "Validate Rows", description: "Reject bad records by standard rules and continue" },
   { type: "pii_encrypt", label: "Encrypt PII", description: "Encrypt selected sensitive columns" },
   { type: "fillna", label: "Fill Null Values", description: "Fixed values, empty string, zero, forward/back fill" },
   { type: "derive", label: "Add Derived Column", description: "Create column with controlled formula builder" },
-  { type: "blank_columns", label: "Add Blank Columns", description: "Create required output columns as blank/null/custom" },
   { type: "filter", label: "Filter Rows", description: "Build AND/OR conditions visually" },
   { type: "value_map", label: "Map Column Values", description: "Map values such as yes to 1 and no to 0" },
   { type: "groupby", label: "Group By", description: "Aggregate rows by one or more columns" },
   { type: "pivot", label: "Pivot", description: "Turn values from rows into output columns" },
   { type: "custom", label: "Custom Transform", description: "Run trusted Python with df, pd, and np" },
   { type: "deduplicate", label: "Remove Duplicates", description: "Drop duplicate rows by subset" },
-  { type: "reorder", label: "Reorder Columns", description: "Control final output column order" },
   { type: "sort", label: "Sort Rows", description: "Order output rows" }
 ];
 
@@ -2058,7 +2123,77 @@ const DATE_FORMAT_OPTIONS = [
   { value: "yy/mm/dd", label: "yy/mm/dd" },
 ];
 const AGG_FUNCS = ["sum", "mean", "min", "max", "count", "count_distinct", "first", "last"];
+const WEEKDAY_OPTIONS = [
+  { value: "0", label: "Sunday" },
+  { value: "1", label: "Monday" },
+  { value: "2", label: "Tuesday" },
+  { value: "3", label: "Wednesday" },
+  { value: "4", label: "Thursday" },
+  { value: "5", label: "Friday" },
+  { value: "6", label: "Saturday" },
+];
 const CONNECTION_TARGET_FIELDS = new Set(["schema", "table", "query", "path_pattern", "output_path_pattern", "rejected_path", "rejected_path_pattern", "operation", "format", "mode", "primary_key", "xlsx_data_sheet", "auto_create_folders"]);
+
+function parseScheduleToBuilder(schedule: string | null | undefined): ScheduleBuilder {
+  const cron = normalizedSchedule(schedule);
+  if (!cron) return { mode: "manual", everyHours: "1", time: "09:00", weekday: "1", dayOfMonth: "1", cron: "" };
+  const parts = cron.split(/\s+/);
+  if (parts.length !== 5) return { mode: "custom", everyHours: "1", time: "09:00", weekday: "1", dayOfMonth: "1", cron };
+  const [minute, hour, day, month, weekday] = parts;
+  if (minute === "0" && (hour === "*" || hour.startsWith("*/")) && day === "*" && month === "*" && weekday === "*") {
+    return { mode: "hourly", everyHours: hour === "*" ? "1" : hour.slice(2), time: "09:00", weekday: "1", dayOfMonth: "1", cron };
+  }
+  if (isNumber(minute) && isNumber(hour) && day === "*" && month === "*" && weekday === "*") {
+    return { mode: "daily", everyHours: "1", time: `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`, weekday: "1", dayOfMonth: "1", cron };
+  }
+  if (isNumber(minute) && isNumber(hour) && day === "*" && month === "*" && isNumber(weekday)) {
+    return { mode: "weekly", everyHours: "1", time: `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`, weekday, dayOfMonth: "1", cron };
+  }
+  if (isNumber(minute) && isNumber(hour) && isNumber(day) && month === "*" && weekday === "*") {
+    return { mode: "monthly", everyHours: "1", time: `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`, weekday: "1", dayOfMonth: day, cron };
+  }
+  return { mode: "custom", everyHours: "1", time: "09:00", weekday: "1", dayOfMonth: "1", cron };
+}
+
+function nextScheduleBuilder(current: ScheduleBuilder, mode: ScheduleMode): ScheduleBuilder {
+  if (mode === "custom") return { ...current, mode, cron: current.cron || normalizedSchedule(buildScheduleCron(current)) };
+  return { ...current, mode, cron: mode === current.mode ? current.cron : "" };
+}
+
+function buildScheduleCron(value: ScheduleBuilder): string {
+  if (value.mode === "manual") return "";
+  if (value.mode === "custom") return normalizedSchedule(value.cron);
+  if (value.mode === "hourly") return `0 */${value.everyHours || "1"} * * *`;
+  const [hour, minute] = splitScheduleTime(value.time);
+  if (value.mode === "daily") return `${minute} ${hour} * * *`;
+  if (value.mode === "weekly") return `${minute} ${hour} * * ${value.weekday || "1"}`;
+  if (value.mode === "monthly") return `${minute} ${hour} ${value.dayOfMonth || "1"} * *`;
+  return "";
+}
+
+function normalizedSchedule(schedule: string | null | undefined): string {
+  return String(schedule || "").trim();
+}
+
+function splitScheduleTime(value: string): [string, string] {
+  const [hour = "09", minute = "00"] = String(value || "09:00").split(":");
+  return [hour.padStart(2, "0"), minute.padStart(2, "0")];
+}
+
+function isNumber(value: string): boolean {
+  return /^\d+$/.test(value);
+}
+
+function describeSchedule(schedule: string | null | undefined): string {
+  const cron = normalizedSchedule(schedule);
+  if (!cron) return "Manual";
+  const builder = parseScheduleToBuilder(cron);
+  if (builder.mode === "hourly") return `Every ${builder.everyHours} hour${builder.everyHours === "1" ? "" : "s"}`;
+  if (builder.mode === "daily") return `Daily at ${builder.time}`;
+  if (builder.mode === "weekly") return `Weekly on ${WEEKDAY_OPTIONS.find((day) => day.value === builder.weekday)?.label || "selected day"} at ${builder.time}`;
+  if (builder.mode === "monthly") return `Monthly on day ${builder.dayOfMonth} at ${builder.time}`;
+  return `Custom (${cron})`;
+}
 
 function defaultSteps(): TransformationStep[] {
   return [

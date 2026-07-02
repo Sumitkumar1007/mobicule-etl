@@ -38,7 +38,7 @@ Main components:
 - `frontend/src/main.tsx`: React application, API client, all screens.
 - `backend/app/main.py`: FastAPI app setup, CORS, auth middleware, startup/shutdown.
 - `backend/app/api/routes.py`: REST API routes for auth, resources, transformations, pipelines, runs, users, metadata.
-- `backend/app/db/database.py`: metadata schema creation, DB helper, bootstrap admin.
+- `backend/app/db/database.py`: metadata schema creation, DB helper, bootstrap superuser.
 - `backend/app/services/runner.py`: extract/load logic and pipeline execution.
 - `backend/app/services/transforms.py`: Pandas transformation engine.
 - `backend/app/services/scheduler.py`: cron-style in-process scheduler.
@@ -118,7 +118,7 @@ Important:
 
 - `.env` must not be committed.
 - Rotate any password that was shared outside intended environment.
-- Bootstrap admin password is only used to create or initialize admin password when no hash exists.
+- Bootstrap admin password is only used to create or initialize the bootstrap superuser password when no hash exists.
 
 ## 6. Local Run Commands
 
@@ -169,7 +169,8 @@ Auth flow:
 
 Roles:
 
-- `admin`: full create/update/delete access, user management, publish transformations.
+- `superuser`: manage users and full platform access.
+- `admin`: manage datasources, destinations, transformations, pipelines, schedules, runs, and logs, but not users.
 - `support`: can run pipelines and inspect support workflows.
 - `viewer`: read-oriented access.
 

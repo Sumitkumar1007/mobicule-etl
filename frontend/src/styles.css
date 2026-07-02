@@ -475,6 +475,11 @@ h2 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.pipelineFormGrid {
+  margin-bottom: 12px;
+  align-items: start;
+}
+
 .formGrid.three {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
@@ -980,6 +985,30 @@ textarea {
 
 .formulaGrid .operandEditor {
   grid-column: span 2;
+}
+
+.scheduleEditor {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  padding: 12px;
+  border: 1px solid #dce4df;
+  border-radius: 8px;
+  background: #fbfdfb;
+}
+
+.scheduleHint {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #eef7ee;
+  color: #215732;
+  font-size: 12px;
+}
+
+.scheduleHint strong {
+  font-size: 13px;
 }
 
 .operandEditor label,

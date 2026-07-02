@@ -12,7 +12,7 @@ MobiFlow ETL is a working MVP for UI-managed ETL:
 - Pandas transformation executor.
 - In-process runner and scheduler.
 - PostgreSQL and SFTP source/destination support.
-- Auth with roles: `admin`, `support`, `viewer`.
+- Auth with roles: `superuser`, `admin`, `support`, `viewer`.
 - Manual runs, cron-style scheduled runs, run logs, and ETL audit logs.
 
 Latest verification from this workspace:

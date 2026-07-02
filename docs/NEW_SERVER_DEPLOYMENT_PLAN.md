@@ -142,7 +142,7 @@ Do not copy secrets into docs or git.
 ### 5.4 Secrets and access prerequisites
 
 - production `.env` values available
-- bootstrap admin credentials available
+- bootstrap superuser credentials available
 - PII encryption key and optional key map available
 - SFTP credentials / keys available where needed
 - source and destination DB credentials available where needed
@@ -341,7 +341,7 @@ Validate:
 
 Minimum smoke test on new server:
 
-1. Login as admin.
+1. Login as superuser or admin, depending on test scope.
 2. Open Data Sources screen.
 3. Open Destinations screen.
 4. Open Transform Builder.

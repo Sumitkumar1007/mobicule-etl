@@ -1,4 +1,4 @@
-from app.services.transforms import apply_transforms, validate_transforms
+from app.services.transforms import apply_transforms, validate_destination_config, validate_transforms
 
 
 def test_select_and_rename_fields():
@@ -688,3 +688,21 @@ def test_validate_deduplicate_and_sort_missing_columns():
         "Step 1 Remove Duplicates references missing columns: missing_id",
         "Step 2 Sort Rows references missing columns: missing_sort",
     ]
+
+def test_validate_sftp_destination_requires_output_path():
+    result = validate_transforms(
+        ["customer_id"],
+        [],
+        destination_key="sftp_destination",
+        destination_config={},
+    )
+
+    assert result["errors"] == [
+        "SFTP destination output path is required. Set Output path or Output date pattern."
+    ]
+
+
+def test_validate_destination_config_allows_sftp_path_or_pattern():
+    assert validate_destination_config("sftp_destination", {"remote_path": "/out/result.csv"}) == []
+    assert validate_destination_config("sftp_destination", {"output_path_pattern": "/out/result_{YYYY}{MM}{DD}.csv"}) == []
+

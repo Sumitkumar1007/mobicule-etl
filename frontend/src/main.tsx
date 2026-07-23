@@ -1329,9 +1329,11 @@ function DatasetTargetEditor({ title, resource, value, options, onChange }: { ti
   }
   if (resource.connector_key === "sftp_destination") {
     const isXlsx = String(value.format ?? "csv") === "xlsx" || String(value.remote_path || value.output_path_pattern || "").endsWith(".xlsx");
+    const pathError = sftpDestinationPathError(value);
     return <div className="formGrid two">
       <label>{title} output path<input value={String(value.remote_path ?? "")} onChange={(event) => onChange({ ...value, remote_path: event.target.value, output_path_pattern: "" })} placeholder="/out/result.csv" /></label>
       <label>Output date pattern<input value={String(value.output_path_pattern ?? "")} onChange={(event) => onChange({ ...value, output_path_pattern: event.target.value, remote_path: "" })} placeholder="/out/result_{YYYY}{MM}{DD}.xlsx" />{Boolean(value.output_path_pattern) && <PatternPreview pattern={String(value.output_path_pattern)} />}</label>
+      {pathError && <p className="errorText formGridFull">{pathError}</p>}
       <label>Rejected/error path<input value={String(value.rejected_path ?? "")} onChange={(event) => onChange({ ...value, rejected_path: event.target.value, rejected_path_pattern: "" })} placeholder="/err/rejected.csv" /></label>
       <label>Rejected/error pattern<input value={String(value.rejected_path_pattern ?? "")} onChange={(event) => onChange({ ...value, rejected_path_pattern: event.target.value, rejected_path: "" })} placeholder="/err/rejected_{YYYY}{MM}{DD}_{timestamp}.csv" />{Boolean(value.rejected_path_pattern) && <PatternPreview pattern={String(value.rejected_path_pattern)} />}</label>
       <label className="toggle inlineToggle"><input type="checkbox" checked={value.auto_create_folders !== false} onChange={(event) => onChange({ ...value, auto_create_folders: event.target.checked })} /> Auto-create output folders</label>
@@ -1345,6 +1347,12 @@ function DatasetTargetEditor({ title, resource, value, options, onChange }: { ti
 function PatternPreview({ pattern }: { pattern: string }) {
   const resolved = formatDatePattern(pattern);
   return <span className="patternPreview">Resolved today: {resolved}</span>;
+}
+
+function sftpDestinationPathError(value: Record<string, unknown>) {
+  return String(value.remote_path || value.output_path_pattern || "").trim()
+    ? ""
+    : "SFTP destination output path is required. Set Output path or Output date pattern.";
 }
 
 function SelectOrInput({ value, options, placeholder, onChange }: { value: string; options: Array<string | { label: string; value: string }>; placeholder: string; onChange: (value: string) => void }) {
@@ -2245,8 +2253,8 @@ function transformationPayload(draft: { name: string; description: string; sourc
     description: draft.description,
     source_id: draft.source_id ? Number(draft.source_id) : null,
     destination_id: draft.destination_id ? Number(draft.destination_id) : null,
-    source_config: sanitizeConnectorConfig("sftp_source", draft.source_config),
-    destination_config: sanitizeConnectorConfig("sftp_destination", draft.destination_config),
+    source_config: sanitizeConnectorConfig("sftp_source", draft.source_config, { preserveTargetFields: true }),
+    destination_config: sanitizeConnectorConfig("sftp_destination", draft.destination_config, { preserveTargetFields: true }),
     steps: sanitizeTransformationSteps(draft.steps)
   };
 }
@@ -2421,11 +2429,17 @@ function escapeHtml(value: string) {
     .replace(/>/g, "&gt;");
 }
 
-function sanitizeConnectorConfig(connectorKey: string, config: Record<string, unknown>) {
+function sanitizeConnectorConfig(
+  connectorKey: string,
+  config: Record<string, unknown>,
+  options?: { preserveTargetFields?: boolean },
+) {
   if (!connectorKey.startsWith("sftp_")) return config;
   const next = { ...config };
-  delete next.path_pattern;
-  delete next.output_path_pattern;
+  if (!options?.preserveTargetFields) {
+    delete next.path_pattern;
+    delete next.output_path_pattern;
+  }
   return next;
 }
 
@@ -2434,7 +2448,7 @@ function sanitizeTransformationSteps(steps: TransformationStep[]) {
     if (step.step_type !== "join") return step;
     const params = { ...step.parameters };
     if (String(params.right_source_mode ?? "") === "same_connection" && params.right_source_config && typeof params.right_source_config === "object") {
-      params.right_source_config = sanitizeConnectorConfig("sftp_source", params.right_source_config as Record<string, unknown>);
+      params.right_source_config = sanitizeConnectorConfig("sftp_source", params.right_source_config as Record<string, unknown>, { preserveTargetFields: true });
     }
     return { ...step, parameters: params };
   });

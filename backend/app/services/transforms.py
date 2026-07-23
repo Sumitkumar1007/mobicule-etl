@@ -522,7 +522,13 @@ def preview_transforms(rows: list[dict[str, Any]], transforms: list[dict[str, An
     return TransformationExecutor().run(rows, transforms)
 
 
-def validate_transforms(columns: list[str], steps: list[dict[str, Any]], destination_columns: list[str] | None = None) -> dict[str, list[str]]:
+def validate_transforms(
+    columns: list[str],
+    steps: list[dict[str, Any]],
+    destination_columns: list[str] | None = None,
+    destination_key: str | None = None,
+    destination_config: dict[str, Any] | None = None,
+) -> dict[str, list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
     current = list(columns)
@@ -579,7 +585,19 @@ def validate_transforms(columns: list[str], steps: list[dict[str, Any]], destina
         missing_destination = [col for col in destination_columns if col not in current]
         if missing_destination:
             errors.append(f"Destination requires missing columns: {', '.join(missing_destination)}")
+    errors.extend(validate_destination_config(destination_key, destination_config))
     return {"errors": errors, "warnings": warnings}
+
+
+def validate_destination_config(destination_key: str | None, destination_config: dict[str, Any] | None) -> list[str]:
+    if destination_key != "sftp_destination":
+        return []
+    config = destination_config or {}
+    remote_path = str(config.get("remote_path") or "").strip()
+    output_path_pattern = str(config.get("output_path_pattern") or "").strip()
+    if remote_path or output_path_pattern:
+        return []
+    return ["SFTP destination output path is required. Set Output path or Output date pattern."]
 
 
 def normalize_step(step: dict[str, Any], index: int = 1) -> dict[str, Any]:

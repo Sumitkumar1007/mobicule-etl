@@ -432,17 +432,27 @@ def validate_transformation(transformation_id: int) -> TransformationValidationR
     source_key = source.connector_key.replace("_destination", "_source")
     columns = source_columns(source_key, source_config)
     destination_columns: list[str] = []
+    destination_key: str | None = None
+    destination_config: dict[str, object] | None = None
     if transformation.destination_id:
         destination = _resource_by_id(transformation.destination_id, "destination")
+        destination_key = destination.connector_key
+        destination_config = _merged_resource_config(destination.config, transformation.destination_config)
         if destination.connector_key == "postgres_destination":
             try:
                 destination_columns = source_columns(
                     destination.connector_key.replace("_destination", "_source"),
-                    _merged_resource_config(destination.config, transformation.destination_config),
+                    destination_config,
                 )
             except Exception:
                 destination_columns = []
-    result = validate_transforms(columns, [step.model_dump() for step in transformation.steps], destination_columns)
+    result = validate_transforms(
+        columns,
+        [step.model_dump() for step in transformation.steps],
+        destination_columns,
+        destination_key=destination_key,
+        destination_config=destination_config,
+    )
     return TransformationValidationResponse(**result)
 
 

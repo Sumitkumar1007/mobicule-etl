@@ -1057,8 +1057,10 @@ function App() {
                 <h2>Run Logs</h2>
               </div>
             </div>
-            <div className="logs">
+            <div className="logs runLogs">
               {selectedRun && <button className="download" onClick={() => downloadRunLogs(selectedRun).catch(showError)}>Download logs</button>}
+              {!selectedRun && <p className="logsEmpty">Select a run to view logs.</p>}
+              {selectedRun && logs.length === 0 && <p className="logsEmpty">No logs available for this run yet.</p>}
               {logs.map((log) => (
                 <p key={log.id}><span>{log.level}</span>{log.message}</p>
               ))}
@@ -1741,7 +1743,7 @@ or paste one column per line"
 
 function RuleTable({ columns, rows, labels, onAdd, onChange }: { columns: string[]; rows: { source: string; target: string }[]; labels: string[]; onAdd: () => void; onChange: (rows: { source: string; target: string }[]) => void }) {
   return <div className="ruleStack">
-    <div className="mappingHead"><span>{labels[0]}</span><span>{labels[1]}</span><span /></div>
+    <div className="mappingHead"><span>{labels[0]}</span><span>{labels[1]}</span><span className="mappingActionHead" /></div>
     {rows.map((row, index) => <div className="mappingRow" key={index}>
       <ColumnSelect value={row.source} columns={columns} onChange={(value) => onChange(updateArray(rows, index, { ...row, source: value }))} />
       <input value={row.target} onChange={(event) => onChange(updateArray(rows, index, { ...row, target: event.target.value }))} />

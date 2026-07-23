@@ -670,9 +670,22 @@ textarea {
 .mappingHead,
 .mappingRow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto;
   gap: 12px;
   align-items: center;
+}
+
+.mappingRow > * {
+  min-width: 0;
+}
+
+.mappingRow input,
+.mappingRow select {
+  width: 100%;
+}
+
+.mappingActionHead {
+  width: 76px;
 }
 
 .mappingHead {
@@ -1222,14 +1235,33 @@ textarea {
   font-size: 13px;
 }
 
+.runLogs {
+  min-height: 220px;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  color: var(--text);
+}
+
 .logs p {
   display: flex;
   gap: 10px;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .logs span {
   color: #63d994;
   font-weight: 900;
+  flex: 0 0 auto;
+}
+
+.runLogs span {
+  color: #166534;
+}
+
+.logsEmpty {
+  color: #64748b;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 .toast {
@@ -1576,13 +1608,12 @@ select {
   border-bottom-color: var(--line);
 }
 
-.logs,
 .preview {
   background: #0b1220;
   color: #e6edf7;
 }
 
-.logs span {
+.preview span {
   color: #72e3a6;
 }
 
@@ -2088,6 +2119,20 @@ section.workspace {
   }
 
   .loginVisual {
+    display: none;
+  }
+}
+
+@media (max-width: 860px) {
+  .mappingHead {
+    display: none;
+  }
+
+  .mappingRow {
+    grid-template-columns: 1fr;
+  }
+
+  .mappingActionHead {
     display: none;
   }
 }

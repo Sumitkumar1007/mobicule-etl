@@ -4,6 +4,7 @@ import fnmatch
 import json
 import logging
 import posixpath
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,6 +13,7 @@ from typing import Any
 import httpx
 
 from app.connectors.registry import get_connector
+from app.core.config import get_settings
 from app.db.database import db, decode, encode
 from app.services.sql_safety import validate_source_query
 from app.services.transforms import preview_transforms
@@ -22,6 +24,25 @@ executor = ThreadPoolExecutor(max_workers=4)
 
 class RunStopped(RuntimeError):
     pass
+
+
+class RunFileLogger:
+    def __init__(self, path: Path):
+        self.path = path
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.handle = self.path.open("a", encoding="utf-8")
+
+    def log(self, level: str, message: str, **fields: Any) -> None:
+        timestamp = datetime.now(UTC).isoformat()
+        field_text = " ".join(f"{key}={_format_run_log_value(value)}" for key, value in fields.items() if value not in (None, "", [], {}, ()))
+        line = f"{timestamp} [{level}] {message}"
+        if field_text:
+            line = f"{line} | {field_text}"
+        self.handle.write(f"{line}\n")
+        self.handle.flush()
+
+    def close(self) -> None:
+        self.handle.close()
 
 
 def enqueue_run(pipeline_id: int, job_type: str = "manual", triggered_by: str = "system") -> int:
@@ -41,47 +62,124 @@ def preview(source_key: str, source_config: dict[str, Any], transforms: list[dic
 
 
 def run_pipeline(run_id: int, job_type: str = "manual", triggered_by: str = "system") -> None:
+    file_logger = _create_run_file_logger(run_id)
     try:
+        _write_run_file_log(file_logger, "INFO", "Run worker started", run_id=run_id, job_type=job_type, triggered_by=triggered_by)
         pipeline = _load_pipeline(run_id)
+        source_path = _source_path(pipeline["source_key"], pipeline["source_config"])
+        target_path = _target_path(pipeline["destination_key"], pipeline["destination_config"])
+        _log(
+            run_id,
+            "INFO",
+            f"Detailed file log: {_run_log_path(run_id)}",
+            file_logger=file_logger,
+            log_file=str(_run_log_path(run_id)),
+            pipeline_name=pipeline["name"],
+        )
+        _write_run_file_log(
+            file_logger,
+            "INFO",
+            "Pipeline loaded",
+            pipeline_id=pipeline["id"],
+            pipeline_name=pipeline["name"],
+            source_key=pipeline["source_key"],
+            destination_key=pipeline["destination_key"],
+            source_path=source_path,
+            target_path=target_path,
+            transform_steps=len(pipeline["transforms"]),
+        )
         if not _mark_running(run_id):
-            _log(run_id, "INFO", "Run was stopped before it started")
+            _log(run_id, "INFO", "Run was stopped before it started", file_logger=file_logger)
             return
-        _log(run_id, "INFO", f"Run started for pipeline {pipeline['name']}")
+        _log(run_id, "INFO", f"Run started for pipeline {pipeline['name']}", file_logger=file_logger, pipeline_id=pipeline["id"], pipeline_name=pipeline["name"])
         _etl_audit_start(run_id, pipeline, job_type, triggered_by)
-        _etl_audit_stage(run_id, "extract", source_path=_source_path(pipeline["source_key"], pipeline["source_config"]))
+        _etl_audit_stage(run_id, "extract", source_path=source_path)
+        _log(run_id, "INFO", "Starting extract", file_logger=file_logger, stage="extract", source_key=pipeline["source_key"], source_path=source_path)
         rows = extract(pipeline["source_key"], pipeline["source_config"])
         _ensure_running(run_id)
         _update_counts(run_id, rows_read=len(rows))
-        _etl_audit_stage(run_id, "transform", total_count=len(rows), source_path=_source_path(pipeline["source_key"], pipeline["source_config"], rows))
-        _log(run_id, "INFO", f"Extracted {len(rows)} rows")
+        resolved_source_path = _source_path(pipeline["source_key"], pipeline["source_config"], rows)
+        _etl_audit_stage(run_id, "transform", total_count=len(rows), source_path=resolved_source_path)
+        _log(
+            run_id,
+            "INFO",
+            f"Extracted {len(rows)} rows",
+            file_logger=file_logger,
+            stage="extract",
+            rows_read=len(rows),
+            column_count=len(rows[0]) if rows else 0,
+            source_path=resolved_source_path,
+            columns=",".join(list(rows[0].keys())[:25]) if rows else "",
+        )
         result = preview_transforms(rows, prepare_runtime_transforms(pipeline["transforms"], pipeline["source_key"], pipeline["source_config"]))
         _ensure_running(run_id)
         rows = result.rows
+        _log(
+            run_id,
+            "INFO",
+            "Transformation completed",
+            file_logger=file_logger,
+            stage="transform",
+            output_rows=len(rows),
+            rejected_rows=len(result.rejected_rows),
+            warnings=len(result.warnings),
+            added_columns=",".join(result.changed_columns.get("added", [])[:25]),
+            removed_columns=",".join(result.changed_columns.get("removed", [])[:25]),
+        )
         _etl_audit_stage(run_id, "reject", rejected_count=len(result.rejected_rows), failed_count=len(result.rejected_rows))
         rejected_path = save_rejected_records(pipeline["destination_key"], pipeline["destination_config"], result.rejected_rows)
         if rejected_path:
-            _log(run_id, "WARNING", f"Rejected records saved: {rejected_path} ({len(result.rejected_rows)} rows)")
+            _log(
+                run_id,
+                "WARNING",
+                f"Rejected records saved: {rejected_path} ({len(result.rejected_rows)} rows)",
+                file_logger=file_logger,
+                stage="reject",
+                rejected_path=rejected_path,
+                rejected_rows=len(result.rejected_rows),
+            )
             _etl_audit_stage(run_id, "reject", error_file_path=rejected_path)
         for step_log in result.logs:
-            _log(run_id, step_log.level, step_log.message)
+            _log(
+                run_id,
+                step_log.level,
+                step_log.message,
+                file_logger=file_logger,
+                stage="transform_step",
+                step_id=step_log.step_id,
+                records_before=step_log.records_before,
+                records_after=step_log.records_after,
+                duration_ms=step_log.duration_ms,
+            )
             _transformation_log(run_id, step_log)
         for warning in result.warnings:
-            _log(run_id, "WARNING", warning)
-        _log(run_id, "INFO", f"Final output rows: {len(rows)}")
+            _log(run_id, "WARNING", warning, file_logger=file_logger, stage="transform_warning")
+        _log(run_id, "INFO", f"Final output rows: {len(rows)}", file_logger=file_logger, stage="load", rows_to_write=len(rows), target_path=target_path)
         _ensure_running(run_id)
-        _etl_audit_stage(run_id, "load", target_path=_target_path(pipeline["destination_key"], pipeline["destination_config"]))
+        _etl_audit_stage(run_id, "load", target_path=target_path)
+        _log(run_id, "INFO", "Starting load", file_logger=file_logger, stage="load", destination_key=pipeline["destination_key"], target_path=target_path, rows_to_write=len(rows))
         written = load(pipeline["destination_key"], pipeline["destination_config"], rows)
         _ensure_running(run_id)
         _succeed(run_id, written)
-        _log(run_id, "INFO", f"Run succeeded, wrote {written} rows")
+        _log(run_id, "INFO", f"Run succeeded, wrote {written} rows", file_logger=file_logger, stage="completed", rows_written=written, target_path=target_path)
         _etl_audit_finish(run_id, "succeeded", success_count=written)
     except RunStopped as exc:
-        _log(run_id, "INFO", str(exc))
+        _log(run_id, "INFO", str(exc), file_logger=file_logger, stage="stopped")
     except Exception as exc:
         logger.exception("Pipeline run failed")
+        _write_run_file_log(
+            file_logger,
+            "ERROR",
+            "Pipeline run failed",
+            error_type=type(exc).__name__,
+            error=str(exc),
+            traceback=traceback.format_exc(),
+        )
         _fail(run_id, str(exc))
-        _log(run_id, "ERROR", str(exc))
+        _log(run_id, "ERROR", str(exc), file_logger=file_logger, stage="failed", error_type=type(exc).__name__)
         _etl_audit_fail(run_id, str(exc))
+    finally:
+        file_logger.close()
 
 
 def extract(source_key: str, config: dict[str, Any]) -> list[dict[str, Any]]:
@@ -783,6 +881,32 @@ def _duration_seconds(start_time: str | None, end_time: str) -> float | None:
         return None
 
 
+def _run_log_path(run_id: int) -> Path:
+    settings = get_settings()
+    settings.run_log_dir.mkdir(parents=True, exist_ok=True)
+    return settings.run_log_dir / f"run_{run_id}.log"
+
+
+def _create_run_file_logger(run_id: int) -> RunFileLogger:
+    return RunFileLogger(_run_log_path(run_id))
+
+
+def _write_run_file_log(file_logger: RunFileLogger | None, level: str, message: str, **fields: Any) -> None:
+    if file_logger is None:
+        return
+    file_logger.log(level, message, **fields)
+
+
+def _format_run_log_value(value: Any) -> str:
+    if isinstance(value, str):
+        if any(char.isspace() for char in value) or "=" in value or ":" in value or "\\" in value:
+            return json.dumps(value)
+        return value
+    if isinstance(value, (list, tuple, set, dict)):
+        return json.dumps(value, default=str, separators=(",", ":"))
+    return str(value)
+
+
 def _source_path(source_key: str, config: dict[str, Any], rows: list[dict[str, Any]] | None = None) -> str:
     if rows:
         files = sorted({str(row.get("_source_file")) for row in rows if row.get("_source_file")})
@@ -812,8 +936,9 @@ def _target_path(destination_key: str, config: dict[str, Any]) -> str:
     return destination_key
 
 
-def _log(run_id: int, level: str, message: str) -> None:
+def _log(run_id: int, level: str, message: str, file_logger: RunFileLogger | None = None, **fields: Any) -> None:
     logger.log(getattr(logging, level, logging.INFO), message)
+    _write_run_file_log(file_logger, level, message, **fields)
     with db() as conn:
         conn.execute("INSERT INTO run_logs (run_id, level, message) VALUES (?, ?, ?)", (run_id, level, message))
 

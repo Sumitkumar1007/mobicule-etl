@@ -1,4 +1,4 @@
-from app.services.runner import _postgres_write_sql, _same_connection_join_config
+from app.services.runner import _format_run_log_value, _postgres_write_sql, _run_log_path, _same_connection_join_config, RunFileLogger
 from app.services.sql_safety import validate_source_query
 
 
@@ -256,3 +256,30 @@ def test_xlsx_input_fails_when_hidden_sheet_present():
         assert "hidden sheets" in str(exc)
     else:
         raise AssertionError("hidden sheets should fail")
+
+def test_run_log_path_uses_settings_directory(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from app.services import runner
+
+    monkeypatch.setattr(runner, "get_settings", lambda: SimpleNamespace(run_log_dir=tmp_path))
+
+    assert _run_log_path(42) == tmp_path / "run_42.log"
+
+
+def test_run_file_logger_writes_detailed_fields(tmp_path):
+    path = tmp_path / "run_9.log"
+    file_logger = RunFileLogger(path)
+    file_logger.log("INFO", "Extracted rows", rows_read=25, source_path="/in/customer file.csv", columns=["id", "name"])
+    file_logger.close()
+
+    content = path.read_text()
+    assert "[INFO] Extracted rows" in content
+    assert 'rows_read=25' in content
+    assert 'source_path="/in/customer file.csv"' in content
+    assert 'columns=["id","name"]' in content
+
+
+def test_format_run_log_value_escapes_newlines():
+    assert _format_run_log_value("line1\nline2") == '"line1\\nline2"'
+

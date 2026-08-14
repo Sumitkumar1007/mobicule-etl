@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     api_prefix: str = "/api"
     metadata_database_url: str
     log_path: Path = Path("logs/app.log")
+    run_log_dir: Path = Path("logs/runs")
     auth_token_ttl_hours: int = 12
     bootstrap_admin_email: str = "admin@mobiflow.local"
     bootstrap_admin_password: str | None = None

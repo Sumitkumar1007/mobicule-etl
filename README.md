@@ -46,6 +46,7 @@ docs/
   SOP.md                       Detailed user guide
   ETL_TOOL_GUIDE.md      Detailed ETL tool user guide
   TEAM_TECHNICAL_OVERVIEW.md   Technical overview for engineering handoff
+  CODE_CHANGE_GUIDE.md         Developer map for where to change backend/frontend code
 ```
 
 ## Environment
